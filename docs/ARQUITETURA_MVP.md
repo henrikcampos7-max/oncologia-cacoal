@@ -1,7 +1,7 @@
 # Arquitetura inicial e modelo de dados — MVP Oncologia Cacoal
 
-> **Status:** rascunho — requer aprovação humana antes de qualquer implementação.
-> Nenhuma tecnologia foi adotada; todas as decisões técnicas marcadas com ⚠️ aguardam validação.
+> **Status:** arquitetura tecnológica aprovada em 2026-08-09 para desenvolvimento com Django + PostgreSQL.
+> Implantação, segurança operacional e uso de dados reais continuam sujeitos às aprovações indicadas.
 >
 > **Privacidade e segurança:** este documento adota segurança e privacidade por desenho como requisitos de projeto. Os princípios de minimização de dados, pseudonimização e limitação de finalidade da LGPD guiam as decisões de modelagem. Conformidade legal não é declarada automaticamente — requer revisão jurídica e operacional.
 
@@ -42,12 +42,12 @@
 
 | Cód | Pendência | Impacto se não resolvida |
 |-----|-----------|--------------------------|
-| P01 | Definição do stack tecnológico (ver Seção 4). | Bloqueante para iniciar implementação. |
-| P02 | Regra exata para "ponto de reposição": dias de cobertura, quantidade fixa ou percentual? | Pode gerar sugestões de compra incorretas. |
-| P03 | Quem pode aprovar compras e movimentações? Existe fluxo de aprovação multinível? | Necessário para design de controle de acesso. |
-| P04 | Formato e destino dos relatórios exportados (PDF, XLSX, e-mail, drive)? | Afeta integrações externas. |
-| P05 | Há necessidade de acesso offline ou funciona somente em rede local/intranet? | Afeta decisão de implantação. |
-| P06 | Estratégia de pseudonimização de pacientes: mecanismo técnico, responsável pelo de-para e controle de acesso ao mapeamento. | Obrigatório antes de qualquer implantação com dados reais. |
+| P01 | **Resolvida:** Django com páginas renderizadas no servidor e PostgreSQL. | Decisão registrada na Seção 4 e em `RECOMENDACAO_TECNICA.md`. |
+| P02 | Extrair e validar tecnicamente a fórmula de ponto de reposição a partir da planilha de referência; datas e quantidades poderão ser alteradas pelo responsável, com confirmação e auditoria. | Bloqueia a implementação da sugestão de compra, mas não a base da aplicação. |
+| P03 | **Resolvida:** somente o farmacêutico responsável pode aprovar compras; no MVP, ele pode aprovar compra criada por ele mesmo. Criação e aprovação devem ser auditadas. | Regra deve ser revista se novos aprovadores forem adicionados. |
+| P04 | **Resolvida:** perguntar o destino em cada relatório, com opções “usar uma vez” ou “usar sempre”; permitir padrão por tipo nas configurações. | Detalhes de formatos serão definidos na implementação do módulo. |
+| P05 | **Resolvida:** funcionamento em computador local e rede interna. | Produção exige HTTPS e controles previstos na recomendação técnica. |
+| P06 | **Parcialmente resolvida:** o farmacêutico responsável controla o de-para fora do banco principal; mecanismo técnico, acesso restrito e auditoria ainda exigem revisão de segurança. | Obrigatório antes de qualquer implantação com dados reais. |
 
 ---
 
@@ -197,7 +197,7 @@ rascunho → em_aprovacao → aprovada → recebida
 | RC03 | Reserva não pode ser criada para quantidade maior que `disponivel(medicamento_id)` (ver fórmula na Seção 3.1). | Reservas |
 | RC04 | Compra só muda para "aprovada" mediante ação explícita de usuário com perfil aprovador. | Compras |
 | RC05 | Auditoria é gravada em toda operação de escrita; falha na auditoria cancela a transação. | Auditoria |
-| RC06 | Alerta de validade deve ser emitido com pelo menos 60 dias de antecedência. ⚠️ Prazo sujeito a confirmação (D02). | Alertas |
+| RC06 | Alerta de validade deve ser emitido com 15 dias de antecedência. O prazo é configurável; toda alteração exige confirmação e auditoria. | Alertas |
 | RC07 | Medicamento com `disponivel` ≤ `estoque_minimo` gera alerta imediato; alerta não é duplicado enquanto a condição persistir. | Alertas |
 | RC08 | Pacientes são identificados somente por `codigo_pseudonimo` neste sistema; o de-para fica em sistema separado com acesso restrito. Requer definição de P06. | Agenda |
 | RC09 | Quantidades e doses são armazenadas com precisão decimal e unidade explícita; o sistema nunca converte automaticamente entre medicamentos ou apresentações distintas. | Medicamentos |
@@ -205,51 +205,33 @@ rascunho → em_aprovacao → aprovada → recebida
 
 ---
 
-## 4. Opções de arquitetura e tecnologia
+## 4. Arquitetura e tecnologia aprovadas
 
-> ⚠️ Nenhuma opção foi adotada. Decisão requer aprovação humana antes de qualquer implementação.
+Decisão humana registrada em 2026-08-09, após o comparativo de `RECOMENDACAO_TECNICA.md`.
 
-### 4.1 Opção A — Aplicação web (SPA + API REST)
-
-| Aspecto | Detalhe |
+| Aspecto | Decisão |
 |---------|---------|
-| Frontend | React, Vue ou Svelte |
-| Backend | Node.js/Express, Django ou FastAPI |
-| Banco | PostgreSQL |
-| Autenticação | JWT com refresh token |
-| Hospedagem | Servidor local ou VPS simples |
-| **Vantagens** | Separação clara de camadas, escalável, ecossistema maduro. |
-| **Riscos** | Maior complexidade inicial; exige manutenção de dois projetos. |
-| **Recomendação** | Adequado se houver equipe com experiência web. |
+| Aplicação | Django 5.2 LTS com páginas renderizadas no servidor |
+| Banco | PostgreSQL em versão principal com suporte ativo e minor release atualizado |
+| Autenticação | Sessões, usuários, grupos, permissões e CSRF nativos do Django |
+| Interface | HTML renderizado no servidor; SPA separada não faz parte do MVP |
+| Operação | Computador local e rede interna; sem exposição direta à internet |
+| Transporte | HTTPS obrigatório para qualquer ambiente com dados reais |
+| Desenvolvimento | Somente dados inteiramente fictícios até aprovação da produção |
 
-### 4.2 Opção B — Aplicação fullstack integrada
+### 4.1 Motivos da decisão
 
-| Aspecto | Detalhe |
-|---------|---------|
-| Stack | Next.js (React + API Routes) ou SvelteKit |
-| Banco | PostgreSQL ou SQLite (início) |
-| ORM | Prisma ou Drizzle |
-| Autenticação | NextAuth / Lucia |
-| **Vantagens** | Um repositório, menos configuração, deploy mais simples. |
-| **Riscos** | Acoplamento entre UI e regras de negócio se não disciplinado. |
-| **Recomendação** | Adequado para MVP rápido com equipe pequena. |
+- reduzir código personalizado de autenticação, administração, formulários, CSRF e migrações;
+- manter uma única aplicação para uma equipe pequena;
+- suportar concorrência e backup mais robusto no PostgreSQL;
+- permitir implantação interna sem dependência obrigatória de nuvem.
 
-### 4.3 Opção C — Planilha evoluída com back-office simples
+### 4.2 Limites da aprovação
 
-| Aspecto | Detalhe |
-|---------|---------|
-| Stack | Google Sheets / AppSheet ou Power Apps |
-| **Vantagens** | Nenhuma implantação; equipe já familiarizada com Excel. |
-| **Riscos** | Limitações de auditoria, controle de acesso e escalabilidade. Dependência de fornecedor SaaS. |
-| **Recomendação** | Somente como solução transitória de curto prazo. |
-
-### 4.4 Critérios de decisão recomendados
-
-1. Experiência técnica da equipe mantenedora.
-2. Disponibilidade de infraestrutura (servidor local vs. nuvem).
-3. Prazo para o primeiro uso operacional.
-4. Requisito de operação offline (P05).
-5. Orçamento de manutenção de longo prazo.
+- a aprovação libera o desenvolvimento da base e dos módulos com dados fictícios;
+- não autoriza implantação, entrada de dados reais ou exposição na internet;
+- versão do PostgreSQL, servidor, certificados, backup e plano de continuidade serão validados antes da produção;
+- troca de framework, banco ou inclusão de serviço externo exige nova decisão documentada.
 
 ---
 
@@ -315,7 +297,7 @@ Fase 5 — Revisão e implantação
 
 ### 6.1 Equipe backend-estoque
 
-- [ ] Decidir stack (Seção 4) e registrar ADR (Architecture Decision Record).
+- [x] Registrar Django + PostgreSQL como stack aprovada (Seção 4 e `RECOMENDACAO_TECNICA.md`).
 - [ ] Criar modelo de dados conforme Seção 3 com migrações versionadas.
 - [ ] Implementar autenticação e autorização na Fase 1 (antes de qualquer módulo de tratamentos).
 - [ ] Implementar auditoria transacional na Fase 1 (RC05).
@@ -329,7 +311,7 @@ Fase 5 — Revisão e implantação
 
 ### 6.2 Equipe frontend-ux
 
-- [ ] Aguardar decisão de stack (bloqueia início).
+- [x] Stack aprovada; aguardar a base Django antes de iniciar telas funcionais.
 - [ ] Definir mapa de telas e fluxo de navegação.
 - [ ] Prototipar telas de estoque, reservas e compras (sem dados reais).
 - [ ] Implementar UI de alertas com distinção visual por nível de urgência.
@@ -353,15 +335,15 @@ Fase 5 — Revisão e implantação
 
 | # | Decisão | Seção |
 |---|---------|-------|
-| D01 | Escolha do stack tecnológico (Opções A, B ou C) — nenhuma implementada. | 4 |
-| D02 | Prazo de antecedência para alerta de validade (sugestão: 60 dias). | RC06 |
-| D03 | Regra exata para ponto de reposição e cálculo de quantidade a comprar. | P02 |
-| D04 | Fluxo de aprovação de compras (um nível ou multinível). | P03 |
-| D05 | Formato e destino dos relatórios exportados. | P04 |
-| D06 | Mecanismo técnico e responsável pela pseudonimização de pacientes. | P06, RC08 |
-| D07 | Operação offline ou somente em rede (afeta implantação). | P05 |
-| D08 | Conformidade regulatória LGPD — requer revisão jurídica; não declarada automaticamente. | R11 |
+| D01 | **Aprovada:** Django 5.2 LTS + PostgreSQL. | 4 |
+| D02 | **Aprovada:** alerta com 15 dias de antecedência, prazo configurável e auditado. | RC06 |
+| D03 | **Parcial:** partir da planilha de referência, permitindo alterar datas e quantidades; fórmula ainda será extraída e validada antes do módulo de compras. | P02 |
+| D04 | **Aprovada:** somente o farmacêutico responsável aprova; autoaprovação permitida no MVP e sempre auditada. | P03 |
+| D05 | **Aprovada:** perguntar o destino por relatório, com “usar uma vez”, “usar sempre” e configuração por tipo. | P04 |
+| D06 | **Parcial:** farmacêutico responsável controla o de-para separado; mecanismo técnico ainda requer revisão de segurança. | P06, RC08 |
+| D07 | **Aprovada:** computador local e rede interna. | P05 |
+| D08 | **Pendente:** conformidade regulatória LGPD requer revisão jurídica; não declarada automaticamente. | R11 |
 
 ---
 
-*Documento gerado em 2026-08-09. Versão 0.2 — rascunho para revisão humana.*
+*Documento atualizado em 2026-08-09. Versão 0.3 — arquitetura aprovada para desenvolvimento com dados fictícios.*

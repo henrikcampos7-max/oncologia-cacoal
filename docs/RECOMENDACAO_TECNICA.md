@@ -1,6 +1,6 @@
 # Recomendação Técnica Comparativa — MVP Oncologia Cacoal
 
-> **Status:** Rascunho — aguardando aprovação humana. Nenhuma decisão aqui é definitiva.
+> **Status:** Aprovada em 2026-08-09 para iniciar o desenvolvimento com Django + PostgreSQL. Implantação e uso de dados reais continuam condicionados às revisões descritas neste documento.
 > **Data:** 2026-08-09
 > **Autor:** Agente planejador-arquitetura (revisão humana obrigatória antes de qualquer implementação)
 
@@ -50,7 +50,7 @@ As opções de cada eixo podem ser combinadas. A tabela comparativa abaixo apres
 
 ## 3. Recomendação Principal e Alternativa de Contingência
 
-> **Todas as opções abaixo são propostas sujeitas à aprovação humana documentada.**
+> **Decisão registrada:** Django + PostgreSQL foi aprovado pelo responsável do projeto em 2026-08-09. A contingência não foi adotada.
 
 ### Recomendação principal — A1 + B1: Django + PostgreSQL
 
@@ -195,27 +195,24 @@ Referência: [NIST SP 800-63B — Authenticators](https://pages.nist.gov/800-63-
 
 ## 8. Decisões que Ainda Exigem Aprovação Humana
 
-Nenhuma das decisões abaixo está aprovada. São **propostas** que precisam de validação do responsável técnico, farmacêutico responsável e, quando aplicável, do responsável pela segurança da informação:
+A escolha de **Django + PostgreSQL** está aprovada. Permanecem pendentes as decisões operacionais abaixo, que precisam de validação do responsável técnico, farmacêutico responsável e, quando aplicável, do responsável pela segurança da informação:
 
-1. **Escolha do framework de aplicação** — Django vs. FastAPI; impacta trabalho de autenticação, admin e formulários.
-2. **Escolha do banco de dados** — PostgreSQL vs. SQLite; depende do perfil técnico disponível para manutenção.
-3. **Versão específica do PostgreSQL a adotar** — seguir versão principal com suporte ativo no momento da implementação.
-4. **Política de backup** — frequência, criptografia, destino (HD externo, NAS ou outro), rotação, responsável e teste mensal de restauração.
-5. **Política de senhas e MFA** — critérios de comprimento, lista de comprometidas, bloqueio de tentativas, hash e fator adicional.
-6. **Pseudonimização de pacientes** — estratégia (hash, ID interno, tabela separada) e quem detém a chave de reversão.
-7. **Perfis de acesso** — quais funções têm permissão de importar, visualizar, aprovar compras, gerar relatórios.
-8. **Computador designado como servidor** — especificações, localização física e controle de acesso físico.
-9. **Plano de continuidade** — o que acontece se o servidor ficar indisponível (processo manual temporário documentado).
-10. **Modelagem de ameaças e revisão de segurança/LGPD** — obrigatória antes de qualquer dado real entrar no sistema.
-11. **Conformidade com LGPD e regulamentações de saúde** — validação jurídica e farmacêutica antes de qualquer dado real.
+1. **Versão específica do PostgreSQL a adotar** — seguir versão principal com suporte ativo no momento da instalação.
+2. **Política de backup** — frequência, criptografia, destino (HD externo, NAS ou outro), rotação, responsável e teste mensal de restauração.
+3. **Política de senhas e MFA** — critérios operacionais, recuperação de conta e fator adicional.
+4. **Mecanismo técnico de pseudonimização** — o farmacêutico responsável controlará o de-para em ambiente separado, mas o mecanismo ainda exige revisão de segurança.
+5. **Computador designado como servidor** — especificações, localização física e controle de acesso físico.
+6. **Plano de continuidade** — o que acontece se o servidor ficar indisponível (processo manual temporário documentado).
+7. **Modelagem de ameaças e revisão de segurança/LGPD** — obrigatória antes de qualquer dado real entrar no sistema.
+8. **Conformidade com LGPD e regulamentações de saúde** — validação jurídica e farmacêutica antes de qualquer dado real.
 
 ---
 
-## 9. Proposta de ADR — Ainda Não Aprovada
+## 9. ADR-001 — Arquitetura Aprovada
 
 ### ADR-001: Framework de aplicação e banco de dados para o MVP local
 
-**Status:** PROPOSTA — não aprovada. Toda decisão exige registro formal.
+**Status:** ACEITA em 2026-08-09 pelo responsável do projeto.
 
 **Contexto:**
 O MVP precisa de uma arquitetura que funcione localmente no Windows, suporte múltiplos usuários na rede interna, minimize trabalho personalizado de autenticação/admin/formulários para uma equipe pequena, ofereça backups confiáveis e não exija infraestrutura de nuvem.
@@ -229,8 +226,8 @@ O MVP precisa de uma arquitetura que funcione localmente no Windows, suporte mú
 | A3 + B1 (descartada neste MVP) | FastAPI (API) + SPA separada | PostgreSQL |
 | MySQL/MariaDB | — | Descartado: sem vantagem relevante sobre PostgreSQL neste cenário |
 
-**Decisão proposta:**
-Django + PostgreSQL como stack principal, com FastAPI + SQLite como contingência se a equipe não tiver capacidade técnica imediata para manter PostgreSQL.
+**Decisão:**
+Django 5.2 LTS com páginas renderizadas no servidor e PostgreSQL como stack do MVP. FastAPI + SQLite permanece apenas como alternativa histórica analisada e não adotada.
 
 **Consequências esperadas:**
 
@@ -238,7 +235,8 @@ Django + PostgreSQL como stack principal, com FastAPI + SQLite como contingênci
 - *FastAPI + SQLite:* instalação mais simples; maior trabalho manual de autenticação e formulários; limitações de concorrência.
 
 **Critérios de aceitação desta ADR:**
-- [ ] Responsável técnico confirma stack escolhida e capacidade de manutenção.
+- [x] Responsável do projeto aprova Django + PostgreSQL.
+- [ ] Responsável técnico confirma capacidade de instalação e manutenção do PostgreSQL.
 - [ ] Versão do PostgreSQL definida como versão principal com suporte ativo no momento da implementação.
 - [ ] Política de backup criptografado definida e testada com dados fictícios.
 - [ ] Política de senhas documentada (alinhada ao NIST SP 800-63B).
@@ -255,4 +253,4 @@ Django + PostgreSQL como stack principal, com FastAPI + SQLite como contingênci
 
 ---
 
-> **Aviso:** Este documento é uma recomendação técnica de planejamento. Não substitui avaliação médica, farmacêutica, jurídica ou regulatória. Nenhuma compra, implantação, acesso a dados reais ou decisão clínica deve ser baseada exclusivamente neste documento. Dados reais somente podem entrar no banco de produção protegido após conclusão da modelagem de ameaças, revisão de segurança, validação LGPD e aprovação humana documentada. Toda decisão listada na seção 8 exige aprovação documentada pelos responsáveis antes de qualquer implementação.
+> **Aviso:** Este documento registra a arquitetura aprovada para desenvolvimento, mas não substitui avaliação médica, farmacêutica, jurídica ou regulatória. Nenhuma compra, implantação, acesso a dados reais ou decisão clínica deve ser baseada exclusivamente neste documento. Dados reais somente podem entrar no banco de produção protegido após conclusão da modelagem de ameaças, revisão de segurança, validação LGPD e aprovação humana documentada. Toda decisão pendente da seção 8 exige aprovação antes da implantação correspondente.

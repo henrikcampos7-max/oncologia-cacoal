@@ -25,7 +25,7 @@
 
 ## Desenvolvimento
 
-- A aplicação ainda não possui arquitetura tecnológica aprovada. Não introduza framework, banco ou serviço externo sem decisão documentada.
+- A arquitetura aprovada em 2026-08-09 é Django com páginas renderizadas no servidor e PostgreSQL. Não substitua framework, banco ou introduza serviço externo sem nova decisão documentada.
 - Prefira alterações pequenas, reversíveis e limitadas ao escopo solicitado.
 - Preserve a identidade visual existente; não redesenhe marcas com IA.
 - Não modifique repositórios de terceiros.

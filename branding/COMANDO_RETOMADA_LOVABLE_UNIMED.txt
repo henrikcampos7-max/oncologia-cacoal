@@ -1,0 +1,70 @@
+CONTINUAR ONCOLOGIA CACOAL
+
+Abra e continue somente o projeto existente “Oncologia Cacoal”:
+https://lovable.dev/projects/151d08a9-76de-4248-b198-63f90674f1ac
+
+Não crie outro projeto, não publique e não use dados reais de pacientes. Antes de qualquer alteração, confirme visualmente que o projeto aberto tem o identificador 151d08a9-76de-4248-b198-63f90674f1ac.
+
+Use como ativo oficial a imagem preparada em:
+C:\Users\henri\Documents\Codex\2026-07-29\concon\outputs\oncologia_cacoal_20260802\branding_unimed\logo_unimed_extraida.png
+
+Aplicar a identidade da Unimed Centro Rondônia à interface:
+- Verde principal: #00824A.
+- Verde complementar: #009B63.
+- Texto e neutros escuros: #373435.
+- Bordas e divisórias: #CFCFCF.
+- Fundo principal: #FFFFFF.
+- Usar #00824A com texto branco nos botões principais.
+- Usar #009B63 apenas em destaques, ícones e estados positivos quando houver contraste adequado.
+- Não substituir as cores semânticas dos alertas informativo, atenção, alto e crítico.
+
+Regras da marca:
+- Não redesenhar nem recriar a logo com IA.
+- Preservar proporções, cores e integridade do ativo fornecido.
+- Se houver ferramenta de recorte sem alteração, usar a marca “Unimed Centro Rondônia” do canto superior esquerdo no cabeçalho e a marca “Centro de Oncologia” do canto superior direito como marca complementar.
+- No celular, priorizar a marca Unimed e o nome “Oncologia Cacoal”, mantendo a navegação legível.
+- Usar a identidade de maneira profissional e discreta no cabeçalho, barra lateral, navegação ativa, botões e detalhes dos cartões.
+- Não usar a imagem completa como fundo da página nem deformá-la.
+
+Manter todas as funcionalidades e regras clínicas já especificadas no arquivo:
+C:\Users\henri\Documents\Codex\2026-07-29\concon\outputs\oncologia_cacoal_20260802\PROMPT_LOVABLE_MVP_IMPORTACAO.txt
+
+Depois de confirmar e aplicar a identidade visual, preparar também a estrutura de desenvolvimento abaixo:
+
+1. Repositório separado
+- Criar um repositório local novo chamado `oncologia-cacoal`.
+- Antes de criar, verificar se já existe uma pasta ou repositório com esse nome para evitar sobrescrita.
+- Não desenvolver dentro de `renatoasse/opensquad` nem de `sickn33/agentic-awesome-skills`.
+- Não alterar, fazer commit ou enviar mudanças para esses dois projetos de terceiros.
+- Usar os projetos de terceiros somente como ferramentas ou referências compatíveis com suas licenças.
+- Não publicar o novo repositório no GitHub, não fazer push e não mudar sua visibilidade sem autorização expressa.
+- Registrar versões separadas para permitir comparação e recuperação de etapas anteriores.
+
+2. Equipe de trabalho por agentes
+- Analista de requisitos: transformar as necessidades da oncologia em histórias e critérios de aceite.
+- Especialista de dados: cuidar da importação, validação e conciliação das planilhas.
+- Desenvolvedor de interface: implementar a identidade Unimed e a experiência responsiva.
+- Desenvolvedor de banco e regras: modelar dados, permissões, RLS, auditoria e rastreabilidade.
+- Revisor farmacêutico/segurança clínica: apontar riscos e itens que exigem validação humana, sem alterar dose nem tomar decisão clínica automaticamente.
+- Testador: verificar funcionamento, permissões, acessibilidade e segurança.
+- Documentador: produzir manual e registro das decisões.
+
+3. Módulos que a equipe deve planejar e desenvolver
+- Agenda.
+- Tratamentos.
+- Medicamentos e apresentações.
+- Estoque.
+- Lotes e validades.
+- Compras e recebimentos.
+- Alertas.
+- Auditoria.
+- Relatórios e indicadores.
+
+4. Forma de execução
+- Trabalhar por etapas pequenas, com revisão humana entre planejamento, implementação e publicação.
+- Usar apenas dados fictícios durante desenvolvimento e testes.
+- Começar pela estrutura segura, identidade visual e MVP de importação/validação já descrito.
+- Manter uma lista clara do que foi concluído, do que está em protótipo e do que depende de validação farmacêutica.
+- Não publicar o sistema nem inserir dados reais sem autorização expressa.
+
+Se a conta do Lovable continuar sem créditos, não comprar plano nem publicar. Parar antes de enviar o comando e informar o bloqueio. Se houver créditos, enviar primeiro esta personalização visual e depois confirmar, com capturas ou descrição objetiva, o que foi alterado e o que permanece pendente.

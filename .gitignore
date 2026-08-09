@@ -1,0 +1,49 @@
+# Dados, planilhas e exportações
+*.xlsx
+*.xls
+*.xlsm
+*.csv
+*.tsv
+workbook_structure.json
+workbook_overview.ndjson
+data/
+dados/
+imports/
+uploads/
+exports/
+*.db
+*.sqlite
+*.sqlite3
+
+# Segredos e credenciais
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+credentials*.json
+secrets*.json
+
+# Dependências e ambientes
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Build, cache e logs
+dist/
+build/
+coverage/
+.cache/
+.tmp/
+temp/
+*.log
+
+# Sistema e IDE
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

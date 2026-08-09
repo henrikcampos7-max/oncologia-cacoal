@@ -1,0 +1,80 @@
+Personalize o projeto atual “Oncologia Cacoal”. Não crie outro projeto, não publique e não use dados reais. Trabalhe somente com dados fictícios em português do Brasil.
+
+Objetivo: transformar o protótipo em um sistema administrativo de previsão de demanda e lista de compras para oncologia, começando por um MVP seguro de importação e validação.
+
+Achados da planilha atual que devem orientar o projeto, sem copiar dados de pacientes:
+- A fonte principal “Aplicacoes” possui: Plano, Paciente, Medicamento, Início do tratamento, Intervalo do ciclo em dias, Dose por ciclo, Unidade, Quantidade de ciclos previstos, Aplicações por ciclo e Status.
+- “Cadastro_Estoque” possui: Medicamento, Estoque atual, Unidade e Observações.
+- Existem abas mensais Agosto a Junho com Paciente, Medicamento, Quantidade de aplicações, Dose total no mês, Unidade, Data prevista e Observações.
+- A planilha atual possui 21.600 erros #REF! na aba oculta de cálculo e 516 erros #NUM! nas abas mensais. Portanto, não copie as fórmulas como fonte da verdade. O aplicativo deve recalcular e apresentar divergências.
+
+Implemente agora a primeira etapa:
+
+1. Estrutura e segurança
+- Autenticação e recuperação de senha.
+- Toda tabela de negócio deve ter clinic_id e isolamento por clínica com RLS.
+- Perfis: administrador, farmacêutico, auxiliar, enfermagem, gestor e somente leitura.
+- Auditoria de inclusão, alteração, importação, aprovação e ajuste.
+- Exclusão preferencialmente lógica.
+
+2. Navegação do sistema
+- Painel
+- Agenda e Tratamentos
+- Pacientes
+- Medicamentos e Apresentações
+- Estoque, Lotes e Validades
+- Transferências
+- Pedidos e Recebimentos
+- Lista de Compras
+- Importações
+- Alertas
+- Relatórios e Indicadores
+- Usuários e Permissões
+- Auditoria e Configurações
+
+3. Primeiro módulo funcional: Agenda e Tratamentos > Importar previsão
+- Perguntar a origem: GMED, agenda da enfermagem, prescrição, guia, Excel, CSV, API, manual ou outro.
+- Solicitar arquivo, data de referência, unidade e observações.
+- Detectar cabeçalhos e mostrar mapeamento entre coluna do arquivo e campo do sistema.
+- Permitir salvar o mapeamento como modelo.
+- Para o modelo inicial, reconhecer os campos da aba Aplicacoes listados acima.
+- Exibir uma prévia antes de gravar.
+- Classificar registros em válidos, exigem revisão, com erro, duplicados e rejeitados.
+- Validar obrigatórios ausentes, paciente ou medicamento não localizado, unidade ausente, data inválida/no passado, aplicação duplicada, outra fonte para a mesma aplicação, dose/data divergente, mudança de protocolo, ciclo fora de sequência, cancelado e medicamento não padronizado.
+- Nunca ignorar inconsistência silenciosamente.
+
+4. Importação de estoque
+- Criar fluxo separado para a aba Cadastro_Estoque.
+- Perguntar se o arquivo representa posição completa ou movimentações.
+- Posição completa substitui a fotografia de saldo na data de referência; não deve ser somada como entrada.
+- Exibir conciliação entre saldo calculado e saldo informado e exigir justificativa para ajuste.
+
+5. Modelo normalizado
+- Não criar colunas específicas para cada mês.
+- Criar registros individuais para tratamentos e aplicações com data prevista, agendada e realizada, ciclo, dia do ciclo, dose, unidade, status, guia e origem.
+- Criar medicamentos e apresentações separadamente, com concentração, unidade clínica, unidade de estoque, unidade comercial, fator de conversão, unidades por caixa, custo, prazo e estoque de segurança.
+- Criar posições e movimentações de estoque separadas.
+- Preparar reservas, lotes, validades, transferências, pedidos, recebimentos, importações, alertas e auditoria.
+
+6. Dashboard do MVP
+- Aplicações nos próximos 7 dias
+- Pacientes sem cobertura
+- Itens críticos
+- Compras pendentes
+- Transferências em trânsito
+- Estoque abaixo do mínimo
+- Importações aguardando validação
+- Ações rápidas para importar previsão, importar estoque, cadastrar paciente, consultar agenda e gerar lista de compras.
+
+7. Regras de segurança clínica
+- A IA pode reconhecer colunas, detectar duplicidades, explicar divergências e sugerir prioridades.
+- A IA não pode alterar dose, aprovar compra, excluir paciente, alterar estoque sem confirmação, assumir equivalência de produtos nem substituir a validação farmacêutica.
+- Toda sugestão deve mostrar dados utilizados, regra, nível de confiança, limitações e necessidade de validação.
+
+8. Interface
+- Responsiva para computador e celular.
+- Visual limpo, profissional e adequado a ambiente hospitalar.
+- Alertas com níveis informativo, atenção, alto e crítico.
+- Dados de demonstração totalmente fictícios.
+
+Ao terminar esta etapa, mostre o que foi criado, o que ficou como protótipo, quais tabelas e políticas RLS foram implementadas e quais pontos ainda exigem validação farmacêutica. Não publique o aplicativo.

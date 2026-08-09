@@ -1,0 +1,7 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<div class="two-columns">
+  {% if pode_editar %}<section class="card"><h2>Novo medicamento</h2><p>Informe a apresentação para o cálculo de frascos.</p><form method="post" class="form-grid">{% csrf_token %}{{ form.as_p }}<button class="button primary" type="submit">＋ Salvar</button></form></section>{% endif %}
+  <section class="card table-card"><h2>Cadastrados</h2><div class="table-wrap"><table><thead><tr><th>Nome</th><th>Concentração</th><th>Apresentação</th><th>MG/Frasco</th></tr></thead><tbody>{% for medicamento in medicamentos %}{% for item in medicamento.apresentacoes.all %}<tr><td>{{ medicamento.nome }}</td><td>{{ item.concentracao }}</td><td>{{ item.descricao }}</td><td>{{ item.quantidade_mg }}</td></tr>{% empty %}<tr><td>{{ medicamento.nome }}</td><td colspan="3">Sem apresentação ativa.</td></tr>{% endfor %}{% empty %}<tr><td colspan="4" class="empty">Nenhum medicamento cadastrado.</td></tr>{% endfor %}</tbody></table></div></section>
+</div>
+{% endblock %}

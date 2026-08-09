@@ -1,0 +1,50 @@
+{% load static %}
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ titulo|default:"Oncologia Cacoal" }} — Oncologia Cacoal</title>
+  <link rel="stylesheet" href="{% static 'core/app.css' %}">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="{% url 'dashboard' %}" aria-label="Oncologia Cacoal - início">
+        <span class="brand-mark"><img src="{% static 'logo_unimed_extraida.png' %}" alt="Unimed Centro Rondônia"></span>
+        <span><strong>Oncologia Cacoal</strong><small>Gestão de tratamentos</small></span>
+      </a>
+      <nav class="nav" aria-label="Navegação principal">
+        <a class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}">▦ <span>Painel</span></a>
+        <a class="{% if request.resolver_match.url_name == 'agenda' %}active{% endif %}" href="{% url 'agenda' %}">▣ <span>Agenda</span></a>
+        <a class="{% if request.resolver_match.url_name == 'pacientes' %}active{% endif %}" href="{% url 'pacientes' %}">♙ <span>Pacientes e Tratamentos</span></a>
+        <a class="{% if request.resolver_match.url_name == 'medicamentos' %}active{% endif %}" href="{% url 'medicamentos' %}">◇ <span>Medicamentos</span></a>
+        <a class="{% if request.resolver_match.url_name == 'quantitativo' %}active{% endif %}" href="{% url 'quantitativo' %}">▤ <span>Quantitativo e Previsão</span></a>
+        <a class="{% if request.resolver_match.kwargs.slug == 'estoque' %}active{% endif %}" href="{% url 'modulo_planejado' 'estoque' %}">▥ <span>Estoque e Validades</span></a>
+        <a class="{% if request.resolver_match.kwargs.slug == 'transferencias' %}active{% endif %}" href="{% url 'modulo_planejado' 'transferencias' %}">⇄ <span>Transferências</span></a>
+        <a class="{% if request.resolver_match.kwargs.slug == 'compras' %}active{% endif %}" href="{% url 'modulo_planejado' 'compras' %}">▧ <span>Compras e Recebimentos</span></a>
+        <a class="{% if request.resolver_match.kwargs.slug == 'importacoes' %}active{% endif %}" href="{% url 'modulo_planejado' 'importacoes' %}">⇧ <span>Importações</span></a>
+        <a class="{% if request.resolver_match.kwargs.slug == 'alertas' %}active{% endif %}" href="{% url 'modulo_planejado' 'alertas' %}">△ <span>Alertas</span></a>
+        <a class="{% if request.resolver_match.kwargs.slug == 'relatorios' %}active{% endif %}" href="{% url 'modulo_planejado' 'relatorios' %}">▨ <span>Relatórios</span></a>
+        <a class="{% if request.resolver_match.kwargs.slug == 'auditoria' %}active{% endif %}" href="{% url 'modulo_planejado' 'auditoria' %}">◎ <span>Permissões e Auditoria</span></a>
+      </nav>
+      <div class="sidebar-footer">
+        <small>{{ request.user.get_full_name|default:request.user.username }}</small>
+        {% if clinica %}<small>{{ clinica.nome }}</small>{% endif %}
+        <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="link-button" type="submit">↪ Sair</button></form>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <button class="menu-button" type="button" aria-label="Abrir menu" onclick="document.body.classList.toggle('menu-open')">☰</button>
+        <div><h1>{{ titulo }}</h1>{% block subtitle %}{% endblock %}</div>
+      </header>
+      <div class="content">
+        {% for message in messages %}<div class="notice {{ message.tags }}">{{ message }}</div>{% endfor %}
+        {% if not perfil %}<div class="notice warning">Seu usuário ainda não está vinculado a uma clínica. Solicite ao administrador a criação do perfil.</div>{% endif %}
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{% extends 'core/base.html' %}
+{% block subtitle %}<p>Visão administrativa do atendimento e da previsão de demanda.</p>{% endblock %}
+{% block content %}
+<section class="metric-grid">
+  <article class="card metric"><span>Aplicações nos próximos 7 dias</span><strong>{{ aplicacoes_7_dias|default:0 }}</strong></article>
+  <article class="card metric"><span>Pacientes ativos</span><strong>{{ pacientes_total|default:0 }}</strong></article>
+  <article class="card metric"><span>Medicamentos cadastrados</span><strong>{{ medicamentos_total|default:0 }}</strong></article>
+  <article class="card metric attention"><span>Itens críticos</span><strong>—</strong><small>Disponível após módulo de estoque</small></article>
+</section>
+<section class="card">
+  <div class="section-heading"><div><h2>Próximos tratamentos</h2><p>Agenda confirmada para revisão da equipe.</p></div><a class="button secondary" href="{% url 'agenda' %}">Abrir agenda</a></div>
+  <div class="table-wrap"><table><thead><tr><th>Data</th><th>Paciente</th><th>Protocolo</th><th>Status</th></tr></thead><tbody>
+  {% for sessao in proximas_sessoes %}<tr><td>{{ sessao.data_hora|date:'d/m/Y H:i' }}</td><td>{{ sessao.paciente.nome }}</td><td>{{ sessao.protocolo.nome }}</td><td><span class="status">{{ sessao.get_status_display }}</span></td></tr>{% empty %}<tr><td colspan="4" class="empty">Nenhum tratamento futuro cadastrado.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+<section class="quick-grid"><a class="card quick" href="{% url 'agenda' %}">Registrar tratamento <span>→</span></a><a class="card quick" href="{% url 'pacientes' %}">Cadastrar paciente <span>→</span></a><a class="card quick" href="{% url 'quantitativo' %}">Calcular quantitativo <span>→</span></a><a class="card quick" href="{% url 'modulo_planejado' 'importacoes' %}">Importar previsão <span>→</span></a></section>
+{% endblock %}

@@ -1,0 +1,38 @@
+{% load static %}
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Entrar — Oncologia Cacoal</title>
+  <link rel="stylesheet" href="{% static 'core/app.css' %}">
+</head>
+<body class="login-body">
+  <main class="login-shell">
+    <section class="login-brand">
+      <div class="login-logo"><img src="{% static 'logo_unimed_extraida.png' %}" alt="Unimed Centro Rondônia"></div>
+      <div>
+        <p class="eyebrow">Oncologia Cacoal</p>
+        <h1>Gestão segura de tratamentos oncológicos.</h1>
+        <p>Organize agenda, pacientes, medicamentos, estoque e previsão de demanda com rastreabilidade e validação humana.</p>
+      </div>
+      <small>Ambiente administrativo • use apenas dados autorizados</small>
+    </section>
+    <section class="login-form-panel">
+      <form method="post" class="login-form">
+        {% csrf_token %}
+        <h2>Entrar</h2>
+        <p>Acesse o painel para gerenciar os tratamentos.</p>
+        {% if form.non_field_errors %}<div class="notice error">E-mail/usuário ou senha inválidos.</div>{% endif %}
+        <label for="id_username">E-mail ou usuário</label>
+        <input id="id_username" name="username" type="text" autocomplete="username" required autofocus>
+        <label for="id_password">Senha</label>
+        <input id="id_password" name="password" type="password" autocomplete="current-password" required>
+        {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+        <button class="button primary wide" type="submit">Entrar</button>
+        <a class="center-link" href="{% url 'solicitar_acesso' %}">Criar conta ou recuperar acesso</a>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

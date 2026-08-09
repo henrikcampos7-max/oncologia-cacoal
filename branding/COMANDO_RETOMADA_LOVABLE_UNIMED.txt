@@ -1,3 +1,6 @@
+DESATIVADO EM 09/08/2026 — NÃO ENVIAR AO LOVABLE.
+Este arquivo é mantido apenas como histórico. A retomada atual deve usar `docs/COMANDO_RETOMADA_GITHUB_DJANGO.md`.
+
 CONTINUAR ONCOLOGIA CACOAL
 
 Abra e continue somente o projeto existente “Oncologia Cacoal”:
@@ -66,5 +69,18 @@ Depois de confirmar e aplicar a identidade visual, preparar também a estrutura 
 - Começar pela estrutura segura, identidade visual e MVP de importação/validação já descrito.
 - Manter uma lista clara do que foi concluído, do que está em protótipo e do que depende de validação farmacêutica.
 - Não publicar o sistema nem inserir dados reais sem autorização expressa.
+
+5. Referência visual e funcional das imagens fornecidas
+- Usar as capturas do OncoManager apenas como referência de organização e fluxo. Não tentar acessar o código restrito, não contornar permissões e não copiar a marca OncoManager.
+- Substituir integralmente a identidade visual pela marca Oncologia Cacoal / Unimed Centro Rondônia e pela paleta institucional definida acima.
+- Criar tela de acesso dividida no computador, com painel institucional à esquerda e formulário de e-mail, senha, Entrar, Criar conta e recuperação de senha à direita; no celular, empilhar e priorizar o formulário.
+- Criar barra lateral responsiva com usuário autenticado e Sair.
+- Agenda: filtro de data, busca de paciente, filtro de protocolo, exportação CSV/PDF, tabela de hora/paciente/protocolo/medicamentos/status e registro do próximo tratamento com paciente, protocolo, ciclo, dia e data.
+- Pacientes e tratamentos: nome, diagnóstico, protocolo, início, peso, altura, superfície corporal, sexo, TFG e inclusão repetível de medicamentos com ciclos, dias do ciclo, posologia, unidade e dose calculada.
+- Medicamentos: nome, concentração, apresentação, quantidade por frasco, listagem e exclusão lógica auditada.
+- Quantitativo: intervalo de datas, cálculo, total de frascos e tabela com medicamento, apresentação, administrações, dose total, quantidade por frasco e frascos necessários.
+- Preservar e acrescentar todos os módulos anteriores: painel, importações, estoque, lotes, validades, transferências, compras, recebimentos, alertas, relatórios, usuários, permissões e auditoria.
+- Cálculos de superfície corporal, dose e frascos são apoio: mostrar metodologia e exigir validação farmacêutica; não tomar decisão clínica automaticamente.
+- Nunca usar nas telas o e-mail ou a senha que aparecem nas imagens de referência; usar somente dados fictícios.
 
 Se a conta do Lovable continuar sem créditos, não comprar plano nem publicar. Parar antes de enviar o comando e informar o bloqueio. Se houver créditos, enviar primeiro esta personalização visual e depois confirmar, com capturas ou descrição objetiva, o que foi alterado e o que permanece pendente.

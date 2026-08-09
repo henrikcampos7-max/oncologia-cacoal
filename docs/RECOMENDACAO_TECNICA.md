@@ -139,7 +139,7 @@ Computadores da equipe (navegadores)
 | **Rede** | Placa de rede com IP fixo na rede interna | Redundância de rede ou UPS |
 | **Python** | 3.12 ou superior (versão com suporte ativo) | — |
 | **PostgreSQL** | Versão principal com suporte ativo no minor release atual (ver [política oficial](https://www.postgresql.org/support/versioning/)) | — |
-| **TLS/HTTPS** | Certificado autoassinado ou de CA interna para uso na rede interna | CA interna gerenciada |
+| **TLS/HTTPS** | Certificado confiável em todos os dispositivos clientes, emitido por CA interna gerenciada; certificado próprio somente com distribuição segura da raiz de confiança nos clientes — nunca orientar usuários a ignorar avisos de certificado | CA interna com renovação automatizada |
 
 ### Computadores dos usuários (clientes)
 
@@ -165,8 +165,8 @@ Computadores da equipe (navegadores)
 
 Referência: [NIST SP 800-63B — Authenticators](https://pages.nist.gov/800-63-4/sp800-63b/authenticators/)
 
-- **Comprimento mínimo:** 12 caracteres; incentivar frases longas.
-- **Verificação contra listas de senhas comprometidas** (ex.: HaveIBeenPwned ou lista local offline) no cadastro e na troca.
+- **Comprimento mínimo:** 15 caracteres quando a senha for o único fator de autenticação; 8 caracteres quando fizer parte de MFA. Permitir pelo menos 64 caracteres; incentivar frases longas.
+- **Verificação contra listas de senhas comprometidas** no cadastro e na troca, usando lista local/offline ou mecanismo que preserve privacidade (ex.: k-anonymity via API de hash parcial). A senha completa nunca deve ser enviada a serviço externo.
 - **Sem exigência de troca periódica arbitrária;** exigir troca somente quando houver evidência de comprometimento.
 - **Bloqueio temporário** após número configurável de tentativas falhas (ex.: 5 tentativas → bloqueio progressivo).
 - **Hash forte com salt** no armazenamento (ex.: bcrypt, Argon2 ou PBKDF2 com parâmetros atualizados).

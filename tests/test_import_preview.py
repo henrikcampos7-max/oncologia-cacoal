@@ -7,6 +7,7 @@ from tools.import_preview import (
     mapping_model_from_dict,
     mapping_model_to_dict,
     preview_forecast_import,
+    preview_stock_import,
     suggest_column_mapping,
 )
 
@@ -179,6 +180,59 @@ class ImportPreviewTests(unittest.TestCase):
         self.assertEqual(preview["summary"]["error"], 1)
         self.assertEqual(preview["rows"][0]["classification"], "error")
         self.assertIn("treatment_start must be a date", preview["rows"][0]["messages"][0])
+
+    def test_preview_stock_import_reconciles_snapshot_with_justification(self) -> None:
+        preview = preview_stock_import(
+            [
+                {
+                    "Medicamento": "Medicamento A",
+                    "Estoque atual": 12,
+                    "Unidade": "frasco",
+                    "Observações": "ajuste por inventário",
+                },
+                {
+                    "Medicamento": "Medicamento B",
+                    "Estoque atual": 5,
+                    "Unidade": "frasco",
+                    "Observações": "",
+                },
+            ],
+            field_mapping={
+                "medication": "Medicamento",
+                "current_stock": "Estoque atual",
+                "unit": "Unidade",
+                "notes": "Observações",
+            },
+            reference_date="2026-08-10",
+            import_mode="snapshot",
+            calculated_stock_by_medication={"Medicamento A": 10, "Medicamento B": 5},
+        )
+
+        self.assertEqual(preview["summary"]["valid"], 2)
+        self.assertEqual(preview["rows"][0]["normalized_row"]["discrepancy"], 2)
+
+    def test_preview_stock_import_requires_review_for_unjustified_movement(self) -> None:
+        preview = preview_stock_import(
+            [
+                {
+                    "Medicamento": "Medicamento A",
+                    "Estoque atual": 2,
+                    "Unidade": "frasco",
+                    "Observações": "",
+                }
+            ],
+            field_mapping={
+                "medication": "Medicamento",
+                "current_stock": "Estoque atual",
+                "unit": "Unidade",
+                "notes": "Observações",
+            },
+            reference_date="2026-08-10",
+            import_mode="movement",
+        )
+
+        self.assertEqual(preview["summary"]["requires_review"], 1)
+        self.assertIn("movimentação sem observação ou justificativa", preview["rows"][0]["messages"])
 
 
 if __name__ == "__main__":

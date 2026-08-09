@@ -83,6 +83,27 @@ preview = preview_forecast_import(
 )
 ```
 
+O mesmo módulo também inclui `preview_stock_import(...)` para a pendência de **importação de estoque**, com:
+
+- distinção explícita entre `snapshot` (posição completa) e `movement` (movimentação);
+- conciliação opcional contra saldo calculado por medicamento;
+- exigência de justificativa quando há divergência de saldo ou movimentação sem observação.
+
+## Contratos normalizados mínimos do domínio
+
+Arquivo: `tools/admin_contracts.py`
+
+O repositório agora possui um contrato inicial normalizado para snapshots administrativos com isolamento por `clinic_id`, cobrindo:
+
+- pacientes;
+- medicamentos;
+- tratamentos;
+- aplicações planejadas;
+- posições de estoque;
+- sessões de importação.
+
+O contrato valida consistência de `clinic_id` em todos os registros antes de aceitar ou recarregar o snapshot.
+
 ## Núcleo inicial de cálculo (demanda/estoque/compras)
 
 Arquivo: `tools/calculate_purchase_plan.py`
@@ -146,7 +167,7 @@ Consulte [SECURITY.md](SECURITY.md) antes de adicionar dados ou integrações.
 
 ## Próximos passos
 
-1. Criar a estrutura inicial da aplicação.
-2. Expandir a importação de estoque com conciliação e justificativa de ajuste.
-3. Adicionar dados fictícios e testes de integração dos fluxos de importação.
+1. Criar a interface inicial da aplicação sobre os contratos e prévias já existentes.
+2. Adicionar dados fictícios e testes de integração dos fluxos de importação.
+3. Expandir auditoria, perfis e permissões por clínica.
 4. Validar fluxos com responsáveis humanos antes de qualquer uso operacional.

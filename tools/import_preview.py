@@ -22,6 +22,13 @@ FORECAST_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "status": ("status", "situacao", "situação"),
 }
 
+STOCK_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "medication": ("medicamento", "produto"),
+    "current_stock": ("estoque atual", "saldo atual", "estoque"),
+    "unit": ("unidade",),
+    "notes": ("observacoes", "observações", "justificativa", "observacao", "observação"),
+}
+
 FORECAST_REQUIRED_FIELDS = (
     "patient",
     "medication",
@@ -33,10 +40,12 @@ FORECAST_REQUIRED_FIELDS = (
     "applications_per_cycle",
     "status",
 )
+STOCK_REQUIRED_FIELDS = ("medication", "current_stock", "unit")
 
 ACTIVE_STATUSES = {"ativo", "active"}
 REVIEW_STATUSES = {"suspenso", "suspended", "inativo", "inactive"}
 REJECTED_STATUSES = {"cancelado", "cancelled"}
+STOCK_IMPORT_MODES = {"snapshot", "movement"}
 
 
 class ImportValidationError(ValueError):
@@ -352,6 +361,120 @@ def preview_forecast_import(
             "schema_version": IMPORT_PREVIEW_SCHEMA_VERSION,
             "source_kind": "forecast_applications",
             "reference_date": baseline_date.isoformat(),
+            "field_mapping": dict(sorted(mapping.items())),
+        },
+        "summary": {
+            "total_rows": len(rows),
+            **counts,
+        },
+        "rows": classified_rows,
+    }
+
+
+def preview_stock_import(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    field_mapping: Mapping[str, str],
+    reference_date: date | datetime | str,
+    import_mode: str,
+    calculated_stock_by_medication: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    mapping = _normalize_mapping(field_mapping)
+    missing_required_fields = [field for field in STOCK_REQUIRED_FIELDS if field not in mapping]
+    if missing_required_fields:
+        missing = ", ".join(sorted(missing_required_fields))
+        raise ImportValidationError(f"field_mapping is missing required fields: {missing}")
+
+    normalized_import_mode = _normalize_text(import_mode)
+    if normalized_import_mode not in STOCK_IMPORT_MODES:
+        raise ImportValidationError("import_mode must be snapshot or movement")
+
+    baseline_date = _parse_date(reference_date, "reference_date")
+    calculated_stock = {
+        _normalize_text(medication): _require_number(amount, f"calculated_stock_by_medication[{medication}]", min_value=0.0)
+        for medication, amount in (calculated_stock_by_medication or {}).items()
+    }
+    classified_rows: list[dict[str, Any]] = []
+    counts = {
+        "valid": 0,
+        "requires_review": 0,
+        "error": 0,
+        "duplicate": 0,
+        "rejected": 0,
+    }
+    seen_medications: set[str] = set()
+
+    for row_index, source_row in enumerate(rows, start=1):
+        normalized_row = {
+            field_name: source_row.get(source_column)
+            for field_name, source_column in mapping.items()
+        }
+        try:
+            medication = _require_text(normalized_row.get("medication"), "medication")
+            current_stock = _require_number(normalized_row.get("current_stock"), "current_stock", min_value=0.0)
+            unit = _require_text(normalized_row.get("unit"), "unit")
+            notes = str(normalized_row.get("notes") or "").strip()
+        except ImportValidationError as exc:
+            classified_rows.append(
+                _classification_payload(
+                    row_number=row_index,
+                    classification="error",
+                    normalized_row=normalized_row,
+                    messages=[str(exc)],
+                )
+            )
+            counts["error"] += 1
+            continue
+
+        normalized_medication = _normalize_text(medication)
+        normalized_row = {
+            **normalized_row,
+            "medication": medication,
+            "current_stock": current_stock,
+            "unit": unit,
+            "notes": notes,
+        }
+        if normalized_medication in seen_medications:
+            classified_rows.append(
+                _classification_payload(
+                    row_number=row_index,
+                    classification="duplicate",
+                    normalized_row=normalized_row,
+                    messages=["medicamento repetido no mesmo arquivo de estoque"],
+                )
+            )
+            counts["duplicate"] += 1
+            continue
+        seen_medications.add(normalized_medication)
+
+        review_reasons: list[str] = []
+        calculated_amount = calculated_stock.get(normalized_medication)
+        if calculated_amount is not None:
+            delta = round(current_stock - calculated_amount, 9)
+            normalized_row["calculated_stock"] = calculated_amount
+            normalized_row["discrepancy"] = delta
+            if delta != 0 and not notes:
+                review_reasons.append("conciliação exige justificativa para ajustar o saldo")
+        if normalized_import_mode == "movement" and not notes:
+            review_reasons.append("movimentação sem observação ou justificativa")
+
+        classification = "requires_review" if review_reasons else "valid"
+        classified_rows.append(
+            _classification_payload(
+                row_number=row_index,
+                classification=classification,
+                normalized_row=normalized_row,
+                messages=review_reasons or ["registro pronto para importação"],
+            )
+        )
+        counts[classification] += 1
+
+    return {
+        "meta": {
+            "schema_version": IMPORT_PREVIEW_SCHEMA_VERSION,
+            "source_kind": "stock_position" if normalized_import_mode == "snapshot" else "stock_movement",
+            "reference_date": baseline_date.isoformat(),
+            "import_mode": normalized_import_mode,
             "field_mapping": dict(sorted(mapping.items())),
         },
         "summary": {

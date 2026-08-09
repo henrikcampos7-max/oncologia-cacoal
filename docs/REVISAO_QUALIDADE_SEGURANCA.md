@@ -101,4 +101,21 @@ A implementação de qualquer fase **fica condicionada** à resolução prévia 
 
 ---
 
+## Atualização das decisões — 2026-08-09
+
+Esta atualização preserva a revisão histórica acima e registra as respostas humanas posteriores:
+
+- **D01/H09 e B05 resolvidos para a base:** Django 5.2 LTS + PostgreSQL, sessões e CSRF nativos; implantação continua sujeita a modelo de ameaças.
+- **D02/H04 e M01 resolvidos:** alerta de validade com 15 dias de antecedência, configurável e auditado.
+- **A02/H02 resolvido para o MVP:** somente o farmacêutico responsável aprova compras; autoaprovação é permitida enquanto ele for o único aprovador e toda ação deve ser auditada.
+- **M03/H07 resolvido:** importação XLSX é atômica; qualquer erro rejeita o arquivo inteiro e deve ser apresentado ao usuário.
+- **D05/H08 resolvido:** destino solicitado por relatório, com opção de uso único, padrão persistente e alteração posterior.
+- **A01/A04 parcialmente resolvido:** o farmacêutico responsável controla o de-para fora do banco principal; o mecanismo técnico e a revisão de segurança ainda bloqueiam módulos com dados de tratamentos.
+- **A03 permanece aberto:** nenhuma escrita de domínio será implementada antes de definir a integridade técnica do log de auditoria.
+- **H05 permanece aberto:** a fórmula de reposição será extraída e validada contra a planilha de referência antes do módulo de compras.
+
+A base Django, a configuração PostgreSQL e verificações sem dados de domínio podem ser iniciadas. Isso não autoriza dados reais, modelos de tratamento, movimentações de estoque ou implantação.
+
+---
+
 *Revisão conduzida pelo agente `qualidade-seguranca`. Não constitui auditoria de segurança formal, revisão jurídica, farmacêutica ou de conformidade regulatória.*

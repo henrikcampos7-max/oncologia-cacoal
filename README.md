@@ -45,6 +45,31 @@ Validações básicas:
 
 Em falhas internas, a execução registra log de exceção e retorna erro padronizado em JSON no `stderr`.
 
+## Núcleo inicial de cálculo (demanda/estoque/compras)
+
+Arquivo: `tools/calculate_purchase_plan.py`
+
+Regras explícitas desta versão:
+
+- demanda mensal é agregada por `medication` + mês (`YYYY-MM`);
+- somente aplicações com status ativo (`ativo`/`active`) entram no cálculo;
+- projeção de compra mensal usa `max(0, demanda - saldo_abertura)`;
+- o saldo de fechamento de um mês é carregado para o mês seguinte.
+
+Exemplo curto:
+
+```python
+from tools.calculate_purchase_plan import DemandRecord, calculate_purchase_plan
+
+plan = calculate_purchase_plan(
+    initial_stock={"Medicamento A": 120},
+    monthly_demand=[
+        DemandRecord("Medicamento A", "2026-08", 100),
+        DemandRecord("Medicamento A", "2026-09", 70),
+    ],
+)
+```
+
 ## Segurança
 
 - Não incluir dados reais de pacientes, prescrições, credenciais ou planilhas operacionais.

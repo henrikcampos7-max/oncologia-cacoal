@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from math import isfinite
+from math import isclose, isfinite
 from typing import Any, Iterable, Mapping, Sequence
 from uuid import uuid4
 
@@ -90,7 +90,7 @@ def _require_sequence(value: Any, field_name: str) -> Sequence[Any]:
 
 
 def _numbers_match(left: float, right: float) -> bool:
-    return abs(left - right) <= FLOAT_TOLERANCE
+    return isclose(left, right, rel_tol=FLOAT_TOLERANCE, abs_tol=FLOAT_TOLERANCE)
 
 
 def _require_bool(value: Any, field_name: str) -> bool:

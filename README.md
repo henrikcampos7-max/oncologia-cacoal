@@ -15,6 +15,36 @@ Projeto em fase de planejamento de um MVP administrativo para previsão de deman
 
 O repositório contém documentação funcional, identidade visual e uma ferramenta de inspeção estrutural de planilhas. A aplicação ainda não foi implementada nem publicada.
 
+## Como executar
+
+Pré-requisito: Python 3.11+.
+
+```bash
+python tools/inspect_xlsx_structure.py <arquivo.xlsx> <saida.json>
+```
+
+Exemplo:
+
+```bash
+python tools/inspect_xlsx_structure.py /caminho/previsao.xlsx /tmp/relatorio.json
+```
+
+## Comportamento de validações e erros
+
+A ferramenta retorna códigos previsíveis:
+
+- `0`: execução com sucesso;
+- `2`: erro de validação de entrada (`VALIDATION_ERROR`);
+- `1`: falha interna inesperada (`INTERNAL_ERROR`).
+
+Validações básicas:
+
+- arquivo de entrada obrigatório, existente e com extensão `.xlsx`;
+- arquivo de saída com extensão `.json`;
+- diretório de saída deve existir.
+
+Em falhas internas, a execução registra log de exceção e retorna erro padronizado em JSON no `stderr`.
+
 ## Segurança
 
 - Não incluir dados reais de pacientes, prescrições, credenciais ou planilhas operacionais.

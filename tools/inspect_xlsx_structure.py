@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sys
 import zipfile
@@ -22,6 +23,13 @@ HEADER_TERMS = {
     "protocolo", "unidade", "nome", "codigo", "código", "compra", "saldo",
     "transferencia", "transferência", "pedido", "valor", "fabricante",
 }
+
+
+LOGGER = logging.getLogger("inspect_xlsx_structure")
+
+
+class ValidationError(ValueError):
+    pass
 
 
 def qname(ns: str, name: str) -> str:
@@ -217,11 +225,36 @@ def inspect_sheet(zf: zipfile.ZipFile, sheet_path: str, strings: list[str]) -> d
     }
 
 
-def main() -> None:
-    if len(sys.argv) != 3:
-        raise SystemExit("usage: inspect_xlsx_structure.py <input.xlsx> <output.json>")
-    input_path = Path(sys.argv[1]).resolve()
-    output_path = Path(sys.argv[2]).resolve()
+def error_response(code: str, message: str, details: dict | None = None) -> dict:
+    response = {"error": {"code": code, "message": message}}
+    if details:
+        response["error"]["details"] = details
+    return response
+
+
+def validate_inputs(argv: list[str]) -> tuple[Path, Path]:
+    if len(argv) != 3:
+        raise ValidationError("usage: inspect_xlsx_structure.py <input.xlsx> <output.json>")
+
+    input_path = Path(argv[1]).resolve()
+    output_path = Path(argv[2]).resolve()
+    if not input_path.exists():
+        raise ValidationError("input file not found")
+    if input_path.suffix.lower() != ".xlsx":
+        raise ValidationError("input file must be .xlsx")
+    if output_path.suffix.lower() != ".json":
+        raise ValidationError("output file must be .json")
+    output_dir = output_path.parent
+    if not output_dir.exists():
+        raise ValidationError("output directory not found")
+    if output_dir.is_file():
+        raise ValidationError("output directory path is a file")
+
+    return input_path, output_path
+
+
+def run(argv: list[str]) -> int:
+    input_path, output_path = validate_inputs(argv)
     stat = input_path.stat()
 
     with zipfile.ZipFile(input_path) as zf:
@@ -320,6 +353,35 @@ def main() -> None:
         "tables": tables,
     }
     print(json.dumps(compact, ensure_ascii=False, indent=2))
+    return 0
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.ERROR, format="%(levelname)s %(name)s %(message)s")
+    try:
+        raise SystemExit(run(sys.argv))
+    except ValidationError as exc:
+        print(
+            json.dumps(
+                error_response("VALIDATION_ERROR", str(exc), {"arguments": sys.argv[1:]}),
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    except Exception as exc:  # pragma: no cover - defensive top-level handler
+        LOGGER.exception(
+            "internal failure while inspecting workbook",
+            extra={"input_argument": sys.argv[1] if len(sys.argv) > 1 else None},
+        )
+        print(
+            json.dumps(
+                error_response("INTERNAL_ERROR", "unexpected error while processing workbook"),
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

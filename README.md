@@ -59,7 +59,12 @@ Regras explícitas desta versão:
 Exemplo curto:
 
 ```python
-from tools.calculate_purchase_plan import DemandRecord, calculate_purchase_plan
+from tools.calculate_purchase_plan import (
+    DemandRecord,
+    build_purchase_plan_snapshot,
+    calculate_purchase_plan,
+    purchase_plan_snapshot_to_dict,
+)
 
 plan = calculate_purchase_plan(
     initial_stock={"Medicamento A": 120},
@@ -68,7 +73,29 @@ plan = calculate_purchase_plan(
         DemandRecord("Medicamento A", "2026-09", 70),
     ],
 )
+
+snapshot = build_purchase_plan_snapshot(
+    initial_stock={"Medicamento A": 120},
+    monthly_demand=[
+        DemandRecord("Medicamento A", "2026-08", 100),
+        DemandRecord("Medicamento A", "2026-09", 70),
+    ],
+)
+payload = purchase_plan_snapshot_to_dict(snapshot)
 ```
+
+Contrato persistível básico do cálculo:
+
+- `meta.schema_version`: versão do contrato (`purchase-plan.v1`);
+- `meta.calculation_id`: identificador do cálculo persistido;
+- `meta.generated_at`: data/hora UTC de geração;
+- `meta.status`: estado inicial do snapshot (`draft`);
+- `meta.review_required`: indica necessidade de validação humana;
+- `initial_stock`: lista normalizada de `{medication, amount}`;
+- `monthly_demand`: lista normalizada de `{medication, month, amount}`;
+- `projections`: saída mensal de `{medication, month, opening_stock, demand, suggested_purchase, closing_stock}`.
+
+Ao recarregar um snapshot, o contrato valida duplicidades e consistência básica do cálculo antes de aceitar os dados persistidos.
 
 ## Segurança
 

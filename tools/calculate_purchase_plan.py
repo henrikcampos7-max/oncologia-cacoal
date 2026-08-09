@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from math import isfinite
 from typing import Any, Iterable, Mapping, Sequence
+from uuid import uuid4
+
+
+PURCHASE_PLAN_SCHEMA_VERSION = "purchase-plan.v1"
 
 
 class CalculationValidationError(ValueError):
@@ -28,6 +32,29 @@ class MonthlyProjection:
     closing_stock: float
 
 
+@dataclass(frozen=True)
+class StockRecord:
+    medication: str
+    amount: float
+
+
+@dataclass(frozen=True)
+class PurchasePlanMeta:
+    schema_version: str
+    calculation_id: str
+    generated_at: str
+    status: str
+    review_required: bool
+
+
+@dataclass(frozen=True)
+class PurchasePlanSnapshot:
+    meta: PurchasePlanMeta
+    initial_stock: tuple[StockRecord, ...]
+    monthly_demand: tuple[DemandRecord, ...]
+    projections: tuple[MonthlyProjection, ...]
+
+
 def _require_non_empty_text(value: str, field_name: str) -> str:
     cleaned = value.strip()
     if not cleaned:
@@ -47,6 +74,18 @@ def _require_number(value: Any, field_name: str, *, min_value: float = 0.0) -> f
     if parsed < min_value:
         raise CalculationValidationError(f"{field_name} must be >= {min_value}")
     return parsed
+
+
+def _require_mapping(value: Any, field_name: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise CalculationValidationError(f"{field_name} must be an object")
+    return value
+
+
+def _require_sequence(value: Any, field_name: str) -> Sequence[Any]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise CalculationValidationError(f"{field_name} must be a list")
+    return value
 
 
 def _validate_month(value: str) -> str:
@@ -97,21 +136,275 @@ def aggregate_monthly_demand(
     ]
 
 
-def calculate_purchase_plan(
-    initial_stock: Mapping[str, Any],
-    monthly_demand: Sequence[DemandRecord],
-) -> list[MonthlyProjection]:
+def _normalize_initial_stock(initial_stock: Mapping[str, Any]) -> dict[str, float]:
     stock_by_medication: dict[str, float] = {}
     for medication, amount in initial_stock.items():
         name = _require_non_empty_text(str(medication), "initial_stock.medication")
         stock_by_medication[name] = _require_number(amount, f"initial_stock[{name}]", min_value=0.0)
+    return stock_by_medication
 
+
+def _normalize_monthly_demand(monthly_demand: Sequence[DemandRecord]) -> dict[str, dict[str, float]]:
     grouped_demand: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     for index, row in enumerate(monthly_demand):
         name = _require_non_empty_text(str(row.medication), f"monthly_demand[{index}].medication")
         month = _validate_month(str(row.month))
         amount = _require_number(row.amount, f"monthly_demand[{index}].amount", min_value=0.0)
         grouped_demand[name][month] += amount
+    return grouped_demand
+
+
+def _stock_records_to_mapping(records: Sequence[StockRecord]) -> dict[str, float]:
+    stock_by_medication: dict[str, float] = {}
+    for index, record in enumerate(records):
+        medication = _require_non_empty_text(str(record.medication), f"initial_stock[{index}].medication")
+        if medication in stock_by_medication:
+            raise CalculationValidationError(f"initial_stock[{index}].medication is duplicated")
+        stock_by_medication[medication] = _require_number(
+            record.amount,
+            f"initial_stock[{index}].amount",
+            min_value=0.0,
+        )
+    return stock_by_medication
+
+
+def _monthly_demand_records_to_sequence(records: Sequence[DemandRecord]) -> list[DemandRecord]:
+    normalized: list[DemandRecord] = []
+    seen_keys: set[tuple[str, str]] = set()
+    for index, record in enumerate(records):
+        medication = _require_non_empty_text(str(record.medication), f"monthly_demand[{index}].medication")
+        month = _validate_month(str(record.month))
+        key = (medication, month)
+        if key in seen_keys:
+            raise CalculationValidationError(f"monthly_demand[{index}] is duplicated")
+        seen_keys.add(key)
+        normalized.append(
+            DemandRecord(
+                medication=medication,
+                month=month,
+                amount=_require_number(record.amount, f"monthly_demand[{index}].amount", min_value=0.0),
+            )
+        )
+    return normalized
+
+
+def _projection_records_to_sequence(records: Sequence[MonthlyProjection]) -> list[MonthlyProjection]:
+    normalized: list[MonthlyProjection] = []
+    seen_keys: set[tuple[str, str]] = set()
+    previous_closing_by_medication: dict[str, float] = {}
+    previous_month_by_medication: dict[str, str] = {}
+    for index, record in enumerate(records):
+        medication = _require_non_empty_text(str(record.medication), f"projections[{index}].medication")
+        month = _validate_month(str(record.month))
+        key = (medication, month)
+        if key in seen_keys:
+            raise CalculationValidationError(f"projections[{index}] is duplicated")
+        seen_keys.add(key)
+
+        opening_stock = _require_number(record.opening_stock, f"projections[{index}].opening_stock", min_value=0.0)
+        demand = _require_number(record.demand, f"projections[{index}].demand", min_value=0.0)
+        suggested_purchase = _require_number(
+            record.suggested_purchase,
+            f"projections[{index}].suggested_purchase",
+            min_value=0.0,
+        )
+        closing_stock = _require_number(record.closing_stock, f"projections[{index}].closing_stock", min_value=0.0)
+
+        expected_purchase = max(0.0, demand - opening_stock)
+        if suggested_purchase != expected_purchase:
+            raise CalculationValidationError(f"projections[{index}].suggested_purchase is inconsistent")
+        expected_closing = max(0.0, opening_stock - demand)
+        if closing_stock != expected_closing:
+            raise CalculationValidationError(f"projections[{index}].closing_stock is inconsistent")
+
+        previous_closing = previous_closing_by_medication.get(medication)
+        if previous_closing is not None and opening_stock != previous_closing:
+            previous_month = previous_month_by_medication[medication]
+            raise CalculationValidationError(
+                f"projections[{index}].opening_stock must match prior closing_stock for {medication} after {previous_month}"
+            )
+        previous_closing_by_medication[medication] = closing_stock
+        previous_month_by_medication[medication] = month
+        normalized.append(
+            MonthlyProjection(
+                medication=medication,
+                month=month,
+                opening_stock=opening_stock,
+                demand=demand,
+                suggested_purchase=suggested_purchase,
+                closing_stock=closing_stock,
+            )
+        )
+    return normalized
+
+
+def build_purchase_plan_snapshot(
+    initial_stock: Mapping[str, Any],
+    monthly_demand: Sequence[DemandRecord],
+) -> PurchasePlanSnapshot:
+    projections = calculate_purchase_plan(initial_stock=initial_stock, monthly_demand=monthly_demand)
+    stock_records = tuple(
+        StockRecord(medication=medication, amount=amount)
+        for medication, amount in sorted(_normalize_initial_stock(initial_stock).items())
+    )
+    demand_records = tuple(
+        DemandRecord(medication=record.medication, month=record.month, amount=record.amount)
+        for record in _monthly_demand_records_to_sequence(monthly_demand)
+    )
+    return PurchasePlanSnapshot(
+        meta=PurchasePlanMeta(
+            schema_version=PURCHASE_PLAN_SCHEMA_VERSION,
+            calculation_id=str(uuid4()),
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            status="draft",
+            review_required=True,
+        ),
+        initial_stock=stock_records,
+        monthly_demand=demand_records,
+        projections=tuple(projections),
+    )
+
+
+def purchase_plan_snapshot_to_dict(snapshot: PurchasePlanSnapshot) -> dict[str, Any]:
+    return {
+        "meta": {
+            "schema_version": snapshot.meta.schema_version,
+            "calculation_id": snapshot.meta.calculation_id,
+            "generated_at": snapshot.meta.generated_at,
+            "status": snapshot.meta.status,
+            "review_required": snapshot.meta.review_required,
+        },
+        "initial_stock": [
+            {"medication": row.medication, "amount": row.amount}
+            for row in snapshot.initial_stock
+        ],
+        "monthly_demand": [
+            {"medication": row.medication, "month": row.month, "amount": row.amount}
+            for row in snapshot.monthly_demand
+        ],
+        "projections": [
+            {
+                "medication": row.medication,
+                "month": row.month,
+                "opening_stock": row.opening_stock,
+                "demand": row.demand,
+                "suggested_purchase": row.suggested_purchase,
+                "closing_stock": row.closing_stock,
+            }
+            for row in snapshot.projections
+        ],
+    }
+
+
+def purchase_plan_snapshot_from_dict(payload: Mapping[str, Any]) -> PurchasePlanSnapshot:
+    document = _require_mapping(payload, "snapshot")
+    meta_payload = _require_mapping(document.get("meta"), "meta")
+    schema_version = _require_non_empty_text(str(meta_payload.get("schema_version", "")), "meta.schema_version")
+    if schema_version != PURCHASE_PLAN_SCHEMA_VERSION:
+        raise CalculationValidationError("meta.schema_version is not supported")
+
+    meta = PurchasePlanMeta(
+        schema_version=schema_version,
+        calculation_id=_require_non_empty_text(str(meta_payload.get("calculation_id", "")), "meta.calculation_id"),
+        generated_at=_require_non_empty_text(str(meta_payload.get("generated_at", "")), "meta.generated_at"),
+        status=_require_non_empty_text(str(meta_payload.get("status", "")), "meta.status"),
+        review_required=bool(meta_payload.get("review_required")),
+    )
+
+    stock_rows = _require_sequence(document.get("initial_stock"), "initial_stock")
+    demand_rows = _require_sequence(document.get("monthly_demand"), "monthly_demand")
+    projection_rows = _require_sequence(document.get("projections"), "projections")
+
+    stock_records = tuple(
+        StockRecord(
+            medication=_require_non_empty_text(
+                str(_require_mapping(row, f"initial_stock[{index}]").get("medication", "")),
+                f"initial_stock[{index}].medication",
+            ),
+            amount=_require_number(
+                _require_mapping(row, f"initial_stock[{index}]").get("amount"),
+                f"initial_stock[{index}].amount",
+                min_value=0.0,
+            ),
+        )
+        for index, row in enumerate(stock_rows)
+    )
+    demand_records = tuple(
+        DemandRecord(
+            medication=_require_non_empty_text(
+                str(_require_mapping(row, f"monthly_demand[{index}]").get("medication", "")),
+                f"monthly_demand[{index}].medication",
+            ),
+            month=_validate_month(
+                str(_require_mapping(row, f"monthly_demand[{index}]").get("month", ""))
+            ),
+            amount=_require_number(
+                _require_mapping(row, f"monthly_demand[{index}]").get("amount"),
+                f"monthly_demand[{index}].amount",
+                min_value=0.0,
+            ),
+        )
+        for index, row in enumerate(demand_rows)
+    )
+    projection_records = tuple(
+        MonthlyProjection(
+            medication=_require_non_empty_text(
+                str(_require_mapping(row, f"projections[{index}]").get("medication", "")),
+                f"projections[{index}].medication",
+            ),
+            month=_validate_month(
+                str(_require_mapping(row, f"projections[{index}]").get("month", ""))
+            ),
+            opening_stock=_require_number(
+                _require_mapping(row, f"projections[{index}]").get("opening_stock"),
+                f"projections[{index}].opening_stock",
+                min_value=0.0,
+            ),
+            demand=_require_number(
+                _require_mapping(row, f"projections[{index}]").get("demand"),
+                f"projections[{index}].demand",
+                min_value=0.0,
+            ),
+            suggested_purchase=_require_number(
+                _require_mapping(row, f"projections[{index}]").get("suggested_purchase"),
+                f"projections[{index}].suggested_purchase",
+                min_value=0.0,
+            ),
+            closing_stock=_require_number(
+                _require_mapping(row, f"projections[{index}]").get("closing_stock"),
+                f"projections[{index}].closing_stock",
+                min_value=0.0,
+            ),
+        )
+        for index, row in enumerate(projection_rows)
+    )
+
+    normalized_stock = _stock_records_to_mapping(stock_records)
+    normalized_demand = tuple(_monthly_demand_records_to_sequence(demand_records))
+    normalized_projections = tuple(_projection_records_to_sequence(projection_records))
+    recalculated_projections = tuple(
+        calculate_purchase_plan(initial_stock=normalized_stock, monthly_demand=normalized_demand)
+    )
+    if normalized_projections != recalculated_projections:
+        raise CalculationValidationError("projections are inconsistent with initial_stock and monthly_demand")
+
+    return PurchasePlanSnapshot(
+        meta=meta,
+        initial_stock=tuple(
+            StockRecord(medication=medication, amount=amount)
+            for medication, amount in sorted(normalized_stock.items())
+        ),
+        monthly_demand=normalized_demand,
+        projections=normalized_projections,
+    )
+
+
+def calculate_purchase_plan(
+    initial_stock: Mapping[str, Any],
+    monthly_demand: Sequence[DemandRecord],
+) -> list[MonthlyProjection]:
+    stock_by_medication = _normalize_initial_stock(initial_stock)
+    grouped_demand = _normalize_monthly_demand(monthly_demand)
 
     projections: list[MonthlyProjection] = []
     for medication, by_month in sorted(grouped_demand.items()):

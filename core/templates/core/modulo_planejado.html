@@ -1,0 +1,2 @@
+{% extends 'core/base.html' %}
+{% block content %}<section class="card planned"><span class="planned-icon">◇</span><h2>{{ titulo }}</h2><p>{{ descricao_modulo }}</p><div class="notice warning">Módulo registrado no escopo e ainda não liberado para operação. Será implementado com testes, permissões e auditoria antes do uso.</div><a class="button secondary" href="{% url 'dashboard' %}">Voltar ao painel</a></section>{% endblock %}

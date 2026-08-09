@@ -13,7 +13,7 @@ Projeto em fase de planejamento de um MVP administrativo para previsão de deman
 
 ## Estado atual
 
-A arquitetura **Django 5.2 LTS + PostgreSQL** foi aprovada em 2026-08-09. O repositório contém a base inicial da aplicação, documentação funcional, identidade visual e uma ferramenta de inspeção estrutural de planilhas. A aplicação ainda não foi implantada nem autorizada para dados reais.
+A arquitetura **Django 5.2 LTS + PostgreSQL** foi aprovada em 2026-08-09. O repositório contém a base da aplicação, documentação funcional, identidade visual, modelos iniciais e uma primeira interface server-rendered para acesso, painel, agenda, pacientes, medicamentos e quantitativo. A aplicação ainda não foi implantada nem autorizada para dados reais.
 
 Consulte [docs/DESENVOLVIMENTO.md](docs/DESENVOLVIMENTO.md) para preparar o ambiente local com dados fictícios.
 
@@ -28,7 +28,8 @@ Consulte [SECURITY.md](SECURITY.md) antes de adicionar dados ou integrações.
 
 ## Próximos passos
 
-1. Instalar e configurar PostgreSQL para desenvolvimento local.
-2. Implementar autenticação, autorização e auditoria transacional.
-3. Adicionar somente dados fictícios e testes das regras críticas.
-4. Validar segurança, LGPD e fluxos com responsáveis humanos antes de qualquer uso operacional.
+1. Instalar e configurar PostgreSQL para desenvolvimento local e aplicar as migrações.
+2. Completar recuperação de acesso, protocolos e itens repetíveis por tratamento.
+3. Implementar estoque, lotes, validades, compras, importações e auditoria transacional.
+4. Adicionar somente dados fictícios e ampliar testes das regras críticas.
+5. Validar segurança, LGPD e fluxos com responsáveis humanos antes de qualquer uso operacional.

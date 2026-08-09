@@ -93,6 +93,12 @@ def _numbers_match(left: float, right: float) -> bool:
     return abs(left - right) <= FLOAT_TOLERANCE
 
 
+def _require_bool(value: Any, field_name: str) -> bool:
+    if not isinstance(value, bool):
+        raise CalculationValidationError(f"{field_name} must be a boolean")
+    return value
+
+
 def _validate_month(value: str) -> str:
     _require_non_empty_text(value, "month")
     try:
@@ -228,7 +234,7 @@ def _projection_records_to_sequence(records: Sequence[MonthlyProjection]) -> lis
             raise CalculationValidationError(
                 f"projections[{index}].opening_stock must match prior closing_stock for {medication} after {previous_month}"
             )
-        previous_closing_by_medication[medication] = closing_stock
+        previous_closing_by_medication[medication] = expected_closing
         previous_month_by_medication[medication] = month
         normalized.append(
             MonthlyProjection(
@@ -313,7 +319,7 @@ def purchase_plan_snapshot_from_dict(payload: Mapping[str, Any]) -> PurchasePlan
         calculation_id=_require_non_empty_text(str(meta_payload.get("calculation_id", "")), "meta.calculation_id"),
         generated_at=_require_non_empty_text(str(meta_payload.get("generated_at", "")), "meta.generated_at"),
         status=_require_non_empty_text(str(meta_payload.get("status", "")), "meta.status"),
-        review_required=bool(meta_payload.get("review_required")),
+        review_required=_require_bool(meta_payload.get("review_required"), "meta.review_required"),
     )
 
     stock_rows = _require_sequence(document.get("initial_stock"), "initial_stock")

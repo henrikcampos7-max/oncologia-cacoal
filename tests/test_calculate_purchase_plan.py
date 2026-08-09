@@ -100,6 +100,17 @@ class PurchasePlanTests(unittest.TestCase):
         with self.assertRaises(CalculationValidationError):
             purchase_plan_snapshot_from_dict(payload)
 
+    def test_purchase_plan_snapshot_requires_boolean_review_required(self) -> None:
+        snapshot = build_purchase_plan_snapshot(
+            initial_stock={"Medicamento A": 120},
+            monthly_demand=[DemandRecord("Medicamento A", "2026-08", 100)],
+        )
+        payload = purchase_plan_snapshot_to_dict(snapshot)
+        payload["meta"]["review_required"] = "false"
+
+        with self.assertRaises(CalculationValidationError):
+            purchase_plan_snapshot_from_dict(payload)
+
 
 if __name__ == "__main__":
     unittest.main()

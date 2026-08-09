@@ -9,6 +9,7 @@ from uuid import uuid4
 
 
 PURCHASE_PLAN_SCHEMA_VERSION = "purchase-plan.v1"
+FLOAT_TOLERANCE = 1e-9
 
 
 class CalculationValidationError(ValueError):
@@ -86,6 +87,10 @@ def _require_sequence(value: Any, field_name: str) -> Sequence[Any]:
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
         raise CalculationValidationError(f"{field_name} must be a list")
     return value
+
+
+def _numbers_match(left: float, right: float) -> bool:
+    return abs(left - right) <= FLOAT_TOLERANCE
 
 
 def _validate_month(value: str) -> str:
@@ -211,14 +216,14 @@ def _projection_records_to_sequence(records: Sequence[MonthlyProjection]) -> lis
         closing_stock = _require_number(record.closing_stock, f"projections[{index}].closing_stock", min_value=0.0)
 
         expected_purchase = max(0.0, demand - opening_stock)
-        if suggested_purchase != expected_purchase:
+        if not _numbers_match(suggested_purchase, expected_purchase):
             raise CalculationValidationError(f"projections[{index}].suggested_purchase is inconsistent")
         expected_closing = max(0.0, opening_stock - demand)
-        if closing_stock != expected_closing:
+        if not _numbers_match(closing_stock, expected_closing):
             raise CalculationValidationError(f"projections[{index}].closing_stock is inconsistent")
 
         previous_closing = previous_closing_by_medication.get(medication)
-        if previous_closing is not None and opening_stock != previous_closing:
+        if previous_closing is not None and not _numbers_match(opening_stock, previous_closing):
             previous_month = previous_month_by_medication[medication]
             raise CalculationValidationError(
                 f"projections[{index}].opening_stock must match prior closing_stock for {medication} after {previous_month}"
@@ -315,69 +320,76 @@ def purchase_plan_snapshot_from_dict(payload: Mapping[str, Any]) -> PurchasePlan
     demand_rows = _require_sequence(document.get("monthly_demand"), "monthly_demand")
     projection_rows = _require_sequence(document.get("projections"), "projections")
 
-    stock_records = tuple(
-        StockRecord(
-            medication=_require_non_empty_text(
-                str(_require_mapping(row, f"initial_stock[{index}]").get("medication", "")),
-                f"initial_stock[{index}].medication",
-            ),
-            amount=_require_number(
-                _require_mapping(row, f"initial_stock[{index}]").get("amount"),
-                f"initial_stock[{index}].amount",
-                min_value=0.0,
-            ),
+    stock_records_list: list[StockRecord] = []
+    for index, row in enumerate(stock_rows):
+        item = _require_mapping(row, f"initial_stock[{index}]")
+        stock_records_list.append(
+            StockRecord(
+                medication=_require_non_empty_text(
+                    str(item.get("medication", "")),
+                    f"initial_stock[{index}].medication",
+                ),
+                amount=_require_number(
+                    item.get("amount"),
+                    f"initial_stock[{index}].amount",
+                    min_value=0.0,
+                ),
+            )
         )
-        for index, row in enumerate(stock_rows)
-    )
-    demand_records = tuple(
-        DemandRecord(
-            medication=_require_non_empty_text(
-                str(_require_mapping(row, f"monthly_demand[{index}]").get("medication", "")),
-                f"monthly_demand[{index}].medication",
-            ),
-            month=_validate_month(
-                str(_require_mapping(row, f"monthly_demand[{index}]").get("month", ""))
-            ),
-            amount=_require_number(
-                _require_mapping(row, f"monthly_demand[{index}]").get("amount"),
-                f"monthly_demand[{index}].amount",
-                min_value=0.0,
-            ),
+    stock_records = tuple(stock_records_list)
+
+    demand_records_list: list[DemandRecord] = []
+    for index, row in enumerate(demand_rows):
+        item = _require_mapping(row, f"monthly_demand[{index}]")
+        demand_records_list.append(
+            DemandRecord(
+                medication=_require_non_empty_text(
+                    str(item.get("medication", "")),
+                    f"monthly_demand[{index}].medication",
+                ),
+                month=_validate_month(str(item.get("month", ""))),
+                amount=_require_number(
+                    item.get("amount"),
+                    f"monthly_demand[{index}].amount",
+                    min_value=0.0,
+                ),
+            )
         )
-        for index, row in enumerate(demand_rows)
-    )
-    projection_records = tuple(
-        MonthlyProjection(
-            medication=_require_non_empty_text(
-                str(_require_mapping(row, f"projections[{index}]").get("medication", "")),
-                f"projections[{index}].medication",
-            ),
-            month=_validate_month(
-                str(_require_mapping(row, f"projections[{index}]").get("month", ""))
-            ),
-            opening_stock=_require_number(
-                _require_mapping(row, f"projections[{index}]").get("opening_stock"),
-                f"projections[{index}].opening_stock",
-                min_value=0.0,
-            ),
-            demand=_require_number(
-                _require_mapping(row, f"projections[{index}]").get("demand"),
-                f"projections[{index}].demand",
-                min_value=0.0,
-            ),
-            suggested_purchase=_require_number(
-                _require_mapping(row, f"projections[{index}]").get("suggested_purchase"),
-                f"projections[{index}].suggested_purchase",
-                min_value=0.0,
-            ),
-            closing_stock=_require_number(
-                _require_mapping(row, f"projections[{index}]").get("closing_stock"),
-                f"projections[{index}].closing_stock",
-                min_value=0.0,
-            ),
+    demand_records = tuple(demand_records_list)
+
+    projection_records_list: list[MonthlyProjection] = []
+    for index, row in enumerate(projection_rows):
+        item = _require_mapping(row, f"projections[{index}]")
+        projection_records_list.append(
+            MonthlyProjection(
+                medication=_require_non_empty_text(
+                    str(item.get("medication", "")),
+                    f"projections[{index}].medication",
+                ),
+                month=_validate_month(str(item.get("month", ""))),
+                opening_stock=_require_number(
+                    item.get("opening_stock"),
+                    f"projections[{index}].opening_stock",
+                    min_value=0.0,
+                ),
+                demand=_require_number(
+                    item.get("demand"),
+                    f"projections[{index}].demand",
+                    min_value=0.0,
+                ),
+                suggested_purchase=_require_number(
+                    item.get("suggested_purchase"),
+                    f"projections[{index}].suggested_purchase",
+                    min_value=0.0,
+                ),
+                closing_stock=_require_number(
+                    item.get("closing_stock"),
+                    f"projections[{index}].closing_stock",
+                    min_value=0.0,
+                ),
+            )
         )
-        for index, row in enumerate(projection_rows)
-    )
+    projection_records = tuple(projection_records_list)
 
     normalized_stock = _stock_records_to_mapping(stock_records)
     normalized_demand = tuple(_monthly_demand_records_to_sequence(demand_records))

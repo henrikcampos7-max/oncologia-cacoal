@@ -45,6 +45,44 @@ Validações básicas:
 
 Em falhas internas, a execução registra log de exceção e retorna erro padronizado em JSON no `stderr`.
 
+## Núcleo inicial de importação e validação
+
+Arquivo: `tools/import_preview.py`
+
+O repositório agora inclui um núcleo inicial para a pendência de **importações e validação da previsão**. Esta etapa cobre:
+
+- sugestão automática de mapeamento de colunas para o layout inicial da aba `Aplicacoes`;
+- contrato persistível para salvar e recarregar modelos de mapeamento;
+- prévia de importação com classificação por linha em `valid`, `requires_review`, `error`, `duplicate` e `rejected`;
+- validações explícitas para paciente, medicamento, data de início, dose, intervalo, unidade, ciclos, aplicações por ciclo e status.
+
+Exemplo curto:
+
+```python
+from tools.import_preview import preview_forecast_import, suggest_column_mapping
+
+mapping = suggest_column_mapping(
+    [
+        "Plano",
+        "Paciente",
+        "Medicamento",
+        "Início do tratamento",
+        "Intervalo do ciclo em dias",
+        "Dose por ciclo",
+        "Unidade",
+        "Quantidade de ciclos previstos",
+        "Aplicações por ciclo",
+        "Status",
+    ]
+)
+
+preview = preview_forecast_import(
+    rows=[...],
+    field_mapping=mapping,
+    reference_date="2026-08-10",
+)
+```
+
 ## Núcleo inicial de cálculo (demanda/estoque/compras)
 
 Arquivo: `tools/calculate_purchase_plan.py`
@@ -108,7 +146,7 @@ Consulte [SECURITY.md](SECURITY.md) antes de adicionar dados ou integrações.
 
 ## Próximos passos
 
-1. Revisar requisitos e modelo de dados.
-2. Criar a estrutura inicial da aplicação.
-3. Adicionar dados fictícios e testes.
+1. Criar a estrutura inicial da aplicação.
+2. Expandir a importação de estoque com conciliação e justificativa de ajuste.
+3. Adicionar dados fictícios e testes de integração dos fluxos de importação.
 4. Validar fluxos com responsáveis humanos antes de qualquer uso operacional.

@@ -253,14 +253,12 @@ def build_purchase_plan_snapshot(
     initial_stock: Mapping[str, Any],
     monthly_demand: Sequence[DemandRecord],
 ) -> PurchasePlanSnapshot:
-    projections = calculate_purchase_plan(initial_stock=initial_stock, monthly_demand=monthly_demand)
+    normalized_stock = _normalize_initial_stock(initial_stock)
+    normalized_demand = tuple(_monthly_demand_records_to_sequence(monthly_demand))
+    projections = calculate_purchase_plan(initial_stock=normalized_stock, monthly_demand=normalized_demand)
     stock_records = tuple(
         StockRecord(medication=medication, amount=amount)
-        for medication, amount in sorted(_normalize_initial_stock(initial_stock).items())
-    )
-    demand_records = tuple(
-        DemandRecord(medication=record.medication, month=record.month, amount=record.amount)
-        for record in _monthly_demand_records_to_sequence(monthly_demand)
+        for medication, amount in sorted(normalized_stock.items())
     )
     return PurchasePlanSnapshot(
         meta=PurchasePlanMeta(
@@ -271,7 +269,7 @@ def build_purchase_plan_snapshot(
             review_required=True,
         ),
         initial_stock=stock_records,
-        monthly_demand=demand_records,
+        monthly_demand=normalized_demand,
         projections=tuple(projections),
     )
 

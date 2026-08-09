@@ -245,10 +245,8 @@ def validate_inputs(argv: list[str]) -> tuple[Path, Path]:
     if output_path.suffix.lower() != ".json":
         raise ValidationError("output file must be .json")
     output_dir = output_path.parent
-    if not output_dir.exists():
+    if not output_dir.is_dir():
         raise ValidationError("output directory not found")
-    if output_dir.is_file():
-        raise ValidationError("output directory path is a file")
 
     return input_path, output_path
 
@@ -359,7 +357,7 @@ def run(argv: list[str]) -> int:
 def main() -> None:
     logging.basicConfig(level=logging.ERROR, format="%(levelname)s %(name)s %(message)s")
     try:
-        raise SystemExit(run(sys.argv))
+        exit_code = run(sys.argv)
     except ValidationError as exc:
         print(
             json.dumps(
@@ -369,7 +367,7 @@ def main() -> None:
             file=sys.stderr,
         )
         raise SystemExit(2)
-    except Exception as exc:  # pragma: no cover - defensive top-level handler
+    except Exception as exc:
         LOGGER.exception(
             "internal failure while inspecting workbook",
             extra={"input_argument": sys.argv[1] if len(sys.argv) > 1 else None},
@@ -382,6 +380,7 @@ def main() -> None:
             file=sys.stderr,
         )
         raise SystemExit(1) from exc
+    raise SystemExit(exit_code)
 
 
 if __name__ == "__main__":

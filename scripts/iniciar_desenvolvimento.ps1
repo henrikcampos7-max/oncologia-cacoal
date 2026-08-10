@@ -38,24 +38,22 @@ if (-not (Test-Path -LiteralPath $python)) {
 
 $pgCtl = Join-Path $postgresPrefix "Library\bin\pg_ctl.exe"
 $pgIsReady = Join-Path $postgresPrefix "Library\bin\pg_isready.exe"
-if (-not (Test-Path -LiteralPath $pgCtl) -or -not (Test-Path -LiteralPath $pgIsReady)) {
-    throw "PostgreSQL local ausente. Execute scripts\configurar_postgresql_local.ps1 primeiro."
-}
-
-$null = & $pgIsReady -h 127.0.0.1 -p 5432 2>$null
-if ($LASTEXITCODE -ne 0) {
-    & $pgCtl -D $postgresData -l $postgresLog -o "-h 127.0.0.1 -p 5432" start -w
-    if ($LASTEXITCODE -ne 0) {
-        throw "O PostgreSQL local não iniciou. Consulte $postgresLog."
-    }
-}
 
 $env:DJANGO_DEBUG = "true"
-$env:POSTGRES_DB = "oncologia_cacoal_dev"
-$env:POSTGRES_USER = "oncologia_cacoal_dev"
-$env:POSTGRES_PASSWORD = Read-ProtectedSecret -Path $appSecretPath
-$env:POSTGRES_HOST = "127.0.0.1"
-$env:POSTGRES_PORT = "5432"
+
+if ((Test-Path -LiteralPath $appSecretPath) -and (Test-Path -LiteralPath $pgCtl) -and (Test-Path -LiteralPath $pgIsReady)) {
+    $null = & $pgIsReady -h 127.0.0.1 -p 5432 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        & $pgCtl -D $postgresData -l $postgresLog -o "-h 127.0.0.1 -p 5432" start -w
+    }
+    $env:POSTGRES_DB = "oncologia_cacoal_dev"
+    $env:POSTGRES_USER = "oncologia_cacoal_dev"
+    $env:POSTGRES_PASSWORD = Read-ProtectedSecret -Path $appSecretPath
+    $env:POSTGRES_HOST = "127.0.0.1"
+    $env:POSTGRES_PORT = "5432"
+} else {
+    $env:DJANGO_USE_SQLITE = "true"
+}
 
 Push-Location $projectRoot
 try {

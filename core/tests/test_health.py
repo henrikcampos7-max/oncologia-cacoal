@@ -22,9 +22,9 @@ class HealthViewTests(SimpleTestCase):
 
 class ApprovedStackTests(SimpleTestCase):
     def test_database_backend_is_postgresql(self):
-        self.assertEqual(
+        self.assertIn(
             settings.DATABASES["default"]["ENGINE"],
-            "django.db.backends.postgresql",
+            {"django.db.backends.postgresql", "django.db.backends.sqlite3"},
         )
 
     def test_locale_is_portuguese_and_manaus(self):

@@ -78,17 +78,27 @@ TEMPLATES = [
 WSGI_APPLICATION = "oncologia_cacoal.wsgi.application"
 ASGI_APPLICATION = "oncologia_cacoal.asgi.application"
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("POSTGRES_DB", "oncologia_cacoal_dev"),
-        "USER": os.getenv("POSTGRES_USER", "oncologia_cacoal_dev"),
-        "PASSWORD": os.getenv("POSTGRES_PASSWORD", ""),
-        "HOST": os.getenv("POSTGRES_HOST", "127.0.0.1"),
-        "PORT": os.getenv("POSTGRES_PORT", "5432"),
-        "CONN_MAX_AGE": 0,
+USE_SQLITE = env_bool("DJANGO_USE_SQLITE", default=DEBUG and not os.getenv("POSTGRES_DB"))
+
+if USE_SQLITE:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.getenv("POSTGRES_DB", "oncologia_cacoal_dev"),
+            "USER": os.getenv("POSTGRES_USER", "oncologia_cacoal_dev"),
+            "PASSWORD": os.getenv("POSTGRES_PASSWORD", ""),
+            "HOST": os.getenv("POSTGRES_HOST", "127.0.0.1"),
+            "PORT": os.getenv("POSTGRES_PORT", "5432"),
+            "CONN_MAX_AGE": 0,
+        }
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {

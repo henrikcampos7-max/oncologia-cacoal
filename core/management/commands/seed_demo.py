@@ -11,7 +11,9 @@ from core.models import (
     Apresentacao,
     Clinica,
     ItemProtocolo,
+    Lote,
     Medicamento,
+    MovimentacaoEstoque,
     Paciente,
     PerfilUsuario,
     Protocolo,
@@ -82,6 +84,32 @@ class Command(BaseCommand):
                 "concentracao": "1 mg/mL (fictício)",
                 "quantidade_mg": Decimal("50"),
                 "ativa": True,
+            },
+        )
+
+        today = timezone.localdate()
+
+        lote_demo, _ = Lote.objects.update_or_create(
+            clinica=clinic,
+            apresentacao=presentation,
+            numero_lote="LOT-2026-DEMO",
+            defaults={
+                "data_validade": today + timezone.timedelta(days=120),
+                "quantidade_inicial": 100,
+                "quantidade_atual": 85,
+                "estoque_minimo": 10,
+                "ativo": True,
+            },
+        )
+
+        MovimentacaoEstoque.objects.get_or_create(
+            clinica=clinic,
+            lote=lote_demo,
+            tipo=MovimentacaoEstoque.TipoMovimentacao.ENTRADA,
+            quantidade=100,
+            defaults={
+                "usuario": user,
+                "observacao": "Recebimento inicial fictício de demonstração",
             },
         )
 

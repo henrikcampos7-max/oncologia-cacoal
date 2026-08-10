@@ -171,3 +171,88 @@ class SessaoTratamento(models.Model):
 
     def __str__(self):
         return f"{self.paciente} — {self.data_hora:%d/%m/%Y %H:%M}"
+
+
+class Lote(models.Model):
+    clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name="lotes")
+    apresentacao = models.ForeignKey(
+        Apresentacao, on_delete=models.PROTECT, related_name="lotes"
+    )
+    numero_lote = models.CharField(max_length=60)
+    data_validade = models.DateField()
+    quantidade_inicial = models.PositiveIntegerField(default=0)
+    quantidade_atual = models.PositiveIntegerField(default=0)
+    estoque_minimo = models.PositiveIntegerField(default=5)
+    ativo = models.BooleanField(default=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["data_validade", "apresentacao__medicamento__nome"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["clinica", "apresentacao", "numero_lote"],
+                name="lote_unico_por_apresentacao_clinica",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.apresentacao} — Lote {self.numero_lote} (Val: {self.data_validade:%d/%m/%Y})"
+
+    @property
+    def dias_para_vencer(self):
+        from django.utils import timezone
+        return (self.data_validade - timezone.localdate()).days
+
+    @property
+    def status_validade(self):
+        dias = self.dias_para_vencer
+        if dias < 0:
+            return "vencido"
+        elif dias <= 30:
+            return "critico"
+        elif dias <= 90:
+            return "alerta"
+        return "ok"
+
+    @property
+    def status_estoque(self):
+        if self.quantidade_atual == 0:
+            return "esgotado"
+        elif self.quantidade_atual <= self.estoque_minimo:
+            return "baixo"
+        return "ok"
+
+
+class MovimentacaoEstoque(models.Model):
+    class TipoMovimentacao(models.TextChoices):
+        ENTRADA = "entrada", "Entrada / Recebimento"
+        SAIDA = "saida", "Saída / Aplicação"
+        PERDA = "perda", "Perda / Descarte"
+        AJUSTE = "ajuste", "Ajuste de Inventário"
+        RESERVA = "reserva", "Reserva"
+
+    clinica = models.ForeignKey(
+        Clinica, on_delete=models.PROTECT, related_name="movimentacoes_estoque"
+    )
+    lote = models.ForeignKey(Lote, on_delete=models.PROTECT, related_name="movimentacoes")
+    tipo = models.CharField(max_length=20, choices=TipoMovimentacao.choices)
+    quantidade = models.IntegerField(help_text="Positivo para entradas, negativo para saídas.")
+    sessao = models.ForeignKey(
+        SessaoTratamento,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="movimentacoes_estoque",
+    )
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    observacao = models.CharField(max_length=255, blank=True)
+    data_hora = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-data_hora"]
+
+    def __str__(self):
+        return f"{self.get_tipo_display()} — {abs(self.quantidade)} un. ({self.lote.numero_lote})"
+

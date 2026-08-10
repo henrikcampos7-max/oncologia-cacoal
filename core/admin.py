@@ -4,7 +4,9 @@ from .models import (
     Apresentacao,
     Clinica,
     ItemProtocolo,
+    Lote,
     Medicamento,
+    MovimentacaoEstoque,
     Paciente,
     PerfilUsuario,
     Protocolo,
@@ -64,6 +66,20 @@ class SessaoTratamentoAdmin(admin.ModelAdmin):
     list_display = ("data_hora", "paciente", "protocolo", "ciclo", "dia_ciclo", "status")
     list_filter = ("clinica", "status")
     search_fields = ("paciente__nome", "protocolo__nome")
+
+
+@admin.register(Lote)
+class LoteAdmin(admin.ModelAdmin):
+    list_display = ("apresentacao", "numero_lote", "data_validade", "quantidade_atual", "estoque_minimo", "ativo")
+    list_filter = ("clinica", "ativo")
+    search_fields = ("numero_lote", "apresentacao__medicamento__nome")
+
+
+@admin.register(MovimentacaoEstoque)
+class MovimentacaoEstoqueAdmin(admin.ModelAdmin):
+    list_display = ("lote", "tipo", "quantidade", "usuario", "data_hora")
+    list_filter = ("clinica", "tipo")
+    search_fields = ("lote__numero_lote", "lote__apresentacao__medicamento__nome")
 
 
 admin.site.site_header = "Oncologia Cacoal — Administração"

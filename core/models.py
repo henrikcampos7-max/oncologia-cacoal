@@ -126,7 +126,7 @@ class Paciente(models.Model):
     peso_kg = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
     altura_cm = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
     sexo = models.CharField(max_length=1, choices=Sexo.choices, blank=True)
-    tfg = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True)
+    ciclos_previstos = models.PositiveSmallIntegerField(default=1, help_text="Quantidade de ciclos previstos para o tratamento")
     ativo = models.BooleanField(default=True)
     criado_em = models.DateTimeField(auto_now_add=True)
 
@@ -135,9 +135,12 @@ class Paciente(models.Model):
 
     @property
     def superficie_corporal(self):
+        """Calcula a superfície corporal usando a fórmula de Mosteller: sqrt((peso * altura) / 3600)"""
         if not self.peso_kg or not self.altura_cm:
             return None
-        return Decimal(str(round(sqrt(float(self.peso_kg * self.altura_cm) / 3600), 2)))
+        # Fórmula de Mosteller: SC = sqrt((peso_kg * altura_cm) / 3600)
+        resultado = sqrt(float(self.peso_kg) * float(self.altura_cm) / 3600)
+        return Decimal(str(round(resultado, 2)))
 
     def __str__(self):
         return self.nome

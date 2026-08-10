@@ -11,8 +11,10 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
 
 from .forms import (
+    ApresentacaoForm,
     LoteForm,
     MedicamentoApresentacaoForm,
+    MedicamentoForm,
     MovimentacaoEstoqueForm,
     PacienteForm,
     PeriodoForm,
@@ -225,6 +227,35 @@ def pacientes(request):
 
 
 @login_required
+def editar_paciente(request, pk):
+    contexto = _contexto(request, "Editar Paciente")
+    clinica, perfil = contexto["clinica"], contexto["perfil"]
+    if not clinica:
+        return HttpResponse("Clínica não encontrada.", status=404)
+    
+    paciente = Paciente.objects.filter(pk=pk, clinica=clinica).first()
+    if not paciente:
+        return HttpResponse("Paciente não encontrado.", status=404)
+    
+    pode_editar = _pode_editar(
+        perfil, {PerfilUsuario.Papel.ADMINISTRADOR, PerfilUsuario.Papel.FARMACEUTICO, PerfilUsuario.Papel.ENFERMAGEM}
+    )
+    
+    if not pode_editar:
+        return HttpResponse("Perfil sem permissão para editar pacientes.", status=403)
+    
+    form = PacienteForm(request.POST or None, instance=paciente, clinica=clinica)
+    if request.method == "POST":
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Paciente atualizado com sucesso.")
+            return redirect("pacientes")
+    
+    contexto.update(form=form, paciente=paciente)
+    return render(request, "core/editar_paciente.html", contexto)
+
+
+@login_required
 def medicamentos(request):
     contexto = _contexto(request, "Cadastro de Medicamentos")
     clinica, perfil = contexto["clinica"], contexto["perfil"]
@@ -248,6 +279,64 @@ def medicamentos(request):
     )
     contexto.update(form=form, medicamentos=apresentacoes, pode_editar=pode_editar)
     return render(request, "core/medicamentos.html", contexto)
+
+
+@login_required
+def editar_medicamento(request, pk):
+    contexto = _contexto(request, "Editar Medicamento")
+    clinica, perfil = contexto["clinica"], contexto["perfil"]
+    if not clinica:
+        return HttpResponse("Clínica não encontrada.", status=404)
+    
+    medicamento = Medicamento.objects.filter(pk=pk, clinica=clinica).first()
+    if not medicamento:
+        return HttpResponse("Medicamento não encontrado.", status=404)
+    
+    pode_editar = _pode_editar(
+        perfil, {PerfilUsuario.Papel.ADMINISTRADOR, PerfilUsuario.Papel.FARMACEUTICO}
+    )
+    
+    if not pode_editar:
+        return HttpResponse("Perfil sem permissão para editar medicamentos.", status=403)
+    
+    form = MedicamentoForm(request.POST or None, instance=medicamento)
+    if request.method == "POST":
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Medicamento atualizado com sucesso.")
+            return redirect("medicamentos")
+    
+    contexto.update(form=form, medicamento=medicamento)
+    return render(request, "core/editar_medicamento.html", contexto)
+
+
+@login_required
+def editar_apresentacao(request, pk):
+    contexto = _contexto(request, "Editar Apresentação")
+    clinica, perfil = contexto["clinica"], contexto["perfil"]
+    if not clinica:
+        return HttpResponse("Clínica não encontrada.", status=404)
+    
+    apresentacao = Apresentacao.objects.filter(pk=pk, medicamento__clinica=clinica).first()
+    if not apresentacao:
+        return HttpResponse("Apresentação não encontrada.", status=404)
+    
+    pode_editar = _pode_editar(
+        perfil, {PerfilUsuario.Papel.ADMINISTRADOR, PerfilUsuario.Papel.FARMACEUTICO}
+    )
+    
+    if not pode_editar:
+        return HttpResponse("Perfil sem permissão para editar apresentações.", status=403)
+    
+    form = ApresentacaoForm(request.POST or None, instance=apresentacao)
+    if request.method == "POST":
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Apresentação atualizada com sucesso.")
+            return redirect("medicamentos")
+    
+    contexto.update(form=form, apresentacao=apresentacao)
+    return render(request, "core/editar_apresentacao.html", contexto)
 
 
 @login_required

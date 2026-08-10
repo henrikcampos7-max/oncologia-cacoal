@@ -38,7 +38,7 @@ class PacienteForm(forms.ModelForm):
             "peso_kg",
             "altura_cm",
             "sexo",
-            "tfg",
+            "ciclos_previstos",
         ]
         widgets = {"data_inicio": DateInput()}
 
@@ -149,4 +149,27 @@ class MovimentacaoEstoqueForm(forms.ModelForm):
             self.fields["lote"].queryset = clinica.lotes.filter(ativo=True).select_related(
                 "apresentacao__medicamento"
             )
+
+
+class MedicamentoForm(forms.ModelForm):
+    class Meta:
+        model = Medicamento
+        fields = ["nome", "principio_ativo", "ativo"]
+        labels = {
+            "nome": "Nome do medicamento",
+            "principio_ativo": "Princípio ativo",
+            "ativo": "Ativo",
+        }
+
+
+class ApresentacaoForm(forms.ModelForm):
+    class Meta:
+        model = Apresentacao
+        fields = ["concentracao", "descricao", "quantidade_mg", "ativa"]
+        labels = {
+            "concentracao": "Concentração",
+            "descricao": "Descrição",
+            "quantidade_mg": "Quantidade (mg)",
+            "ativa": "Ativa",
+        }
 

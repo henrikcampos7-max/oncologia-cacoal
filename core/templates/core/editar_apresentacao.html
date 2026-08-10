@@ -1,0 +1,19 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<section class="card">
+    <div class="section-heading">
+        <div>
+            <h2>Editar Apresentação: {{ apresentacao.descricao }}</h2>
+            <p>Atualize os dados da apresentação. Use somente dados fictícios neste ambiente.</p>
+        </div>
+    </div>
+    <form method="post" class="form-grid">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <div class="form-actions">
+            <button class="button primary" type="submit">Salvar alterações</button>
+            <a href="{% url 'medicamentos' %}" class="button">Cancelar</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

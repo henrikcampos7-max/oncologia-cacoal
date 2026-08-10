@@ -20,12 +20,12 @@
         <a class="{% if request.resolver_match.url_name == 'pacientes' %}active{% endif %}" href="{% url 'pacientes' %}">♙ <span>Pacientes e Tratamentos</span></a>
         <a class="{% if request.resolver_match.url_name == 'medicamentos' %}active{% endif %}" href="{% url 'medicamentos' %}">◇ <span>Medicamentos</span></a>
         <a class="{% if request.resolver_match.url_name == 'quantitativo' %}active{% endif %}" href="{% url 'quantitativo' %}">▤ <span>Quantitativo e Previsão</span></a>
-        <a class="{% if request.resolver_match.kwargs.slug == 'estoque' %}active{% endif %}" href="{% url 'modulo_planejado' 'estoque' %}">▥ <span>Estoque e Validades</span></a>
+        <a class="{% if request.resolver_match.url_name == 'estoque' %}active{% endif %}" href="{% url 'estoque' %}">▥ <span>Estoque e Validades</span></a>
         <a class="{% if request.resolver_match.kwargs.slug == 'transferencias' %}active{% endif %}" href="{% url 'modulo_planejado' 'transferencias' %}">⇄ <span>Transferências</span></a>
-        <a class="{% if request.resolver_match.kwargs.slug == 'compras' %}active{% endif %}" href="{% url 'modulo_planejado' 'compras' %}">▧ <span>Compras e Recebimentos</span></a>
+        <a class="{% if request.resolver_match.url_name == 'compras' %}active{% endif %}" href="{% url 'compras' %}">▧ <span>Compras e Recebimentos</span></a>
         <a class="{% if request.resolver_match.kwargs.slug == 'importacoes' %}active{% endif %}" href="{% url 'modulo_planejado' 'importacoes' %}">⇧ <span>Importações</span></a>
-        <a class="{% if request.resolver_match.kwargs.slug == 'alertas' %}active{% endif %}" href="{% url 'modulo_planejado' 'alertas' %}">△ <span>Alertas</span></a>
-        <a class="{% if request.resolver_match.kwargs.slug == 'relatorios' %}active{% endif %}" href="{% url 'modulo_planejado' 'relatorios' %}">▨ <span>Relatórios</span></a>
+        <a class="{% if request.resolver_match.url_name == 'alertas' %}active{% endif %}" href="{% url 'alertas' %}">△ <span>Alertas</span></a>
+        <a class="{% if request.resolver_match.url_name == 'relatorios' %}active{% endif %}" href="{% url 'relatorios' %}">▨ <span>Relatórios</span></a>
         <a class="{% if request.resolver_match.kwargs.slug == 'auditoria' %}active{% endif %}" href="{% url 'modulo_planejado' 'auditoria' %}">◎ <span>Permissões e Auditoria</span></a>
       </nav>
       <div class="sidebar-footer">

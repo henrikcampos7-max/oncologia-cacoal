@@ -10,8 +10,15 @@ from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
 
-from .forms import MedicamentoApresentacaoForm, PacienteForm, PeriodoForm, SessaoTratamentoForm
-from .models import PerfilUsuario, SessaoTratamento
+from .forms import (
+    LoteForm,
+    MedicamentoApresentacaoForm,
+    MovimentacaoEstoqueForm,
+    PacienteForm,
+    PeriodoForm,
+    SessaoTratamentoForm,
+)
+from .models import Apresentacao, Lote, Medicamento, MovimentacaoEstoque, Paciente, PerfilUsuario, SessaoTratamento
 from .services import resumir_sessoes
 
 
@@ -237,12 +244,8 @@ def quantitativo(request):
 
 
 MODULOS = {
-    "estoque": ("Estoque, Lotes e Validades", "Posições, movimentações, reservas, lotes e validade."),
     "transferencias": ("Transferências", "Transferências entre unidades com rastreabilidade."),
-    "compras": ("Pedidos, Compras e Recebimentos", "Lista de compras, pedidos e recebimentos."),
     "importacoes": ("Importações", "Mapeamento, prévia, validação e conciliação de arquivos."),
-    "alertas": ("Alertas", "Falta, mínimo, validade, divergências e pendências."),
-    "relatorios": ("Relatórios e Indicadores", "Relatórios controlados e indicadores administrativos."),
     "auditoria": ("Usuários, Permissões e Auditoria", "Perfis, acessos e trilha de auditoria."),
 }
 
@@ -253,3 +256,158 @@ def modulo_planejado(request, slug):
     contexto = _contexto(request, titulo)
     contexto["descricao_modulo"] = descricao
     return render(request, "core/modulo_planejado.html", contexto)
+
+
+@login_required
+def estoque(request):
+    contexto = _contexto(request, "Estoque, Lotes e Validades")
+    clinica, perfil = contexto["clinica"], contexto["perfil"]
+    if not clinica:
+        return render(request, "core/estoque.html", contexto)
+
+    pode_editar = _pode_editar(
+        perfil, {PerfilUsuario.Papel.ADMINISTRADOR, PerfilUsuario.Papel.FARMACEUTICO}
+    )
+
+    form_lote = LoteForm(request.POST or None, clinica=clinica, prefix="lote")
+    form_movimentacao = MovimentacaoEstoqueForm(request.POST or None, clinica=clinica, prefix="mov")
+
+    if request.method == "POST" and pode_editar:
+        if "salvar_lote" in request.POST and form_lote.is_valid():
+            with transaction.atomic():
+                lote = form_lote.save(commit=False)
+                lote.clinica = clinica
+                lote.quantidade_atual = lote.quantidade_inicial
+                lote.save()
+
+                if lote.quantidade_inicial > 0:
+                    MovimentacaoEstoque.objects.create(
+                        clinica=clinica,
+                        lote=lote,
+                        tipo=MovimentacaoEstoque.TipoMovimentacao.ENTRADA,
+                        quantidade=lote.quantidade_inicial,
+                        usuario=request.user,
+                        observacao="Carga inicial de estoque",
+                    )
+            messages.success(request, f"Lote {lote.numero_lote} cadastrado com sucesso.")
+            return redirect("estoque")
+
+        elif "salvar_movimentacao" in request.POST and form_movimentacao.is_valid():
+            mov = form_movimentacao.save(commit=False)
+            mov.clinica = clinica
+            mov.usuario = request.user
+            with transaction.atomic():
+                lote = mov.lote
+                if mov.tipo in [MovimentacaoEstoque.TipoMovimentacao.SAIDA, MovimentacaoEstoque.TipoMovimentacao.PERDA]:
+                    qtd = -abs(mov.quantidade)
+                else:
+                    qtd = abs(mov.quantidade)
+                mov.quantidade = qtd
+                mov.save()
+                lote.quantidade_atual = max(0, lote.quantidade_atual + qtd)
+                lote.save()
+            messages.success(request, f"Movimentação registrada para o lote {lote.numero_lote}.")
+            return redirect("estoque")
+
+    lotes = (
+        clinica.lotes.filter(ativo=True)
+        .select_related("apresentacao__medicamento")
+        .order_by("data_validade")
+    )
+    movimentacoes = (
+        clinica.movimentacoes_estoque.select_related(
+            "lote__apresentacao__medicamento", "usuario"
+        ).order_by("-data_hora")[:20]
+    )
+
+    contexto.update(
+        form_lote=form_lote,
+        form_movimentacao=form_movimentacao,
+        lotes=lotes,
+        movimentacoes=movimentacoes,
+        pode_editar=pode_editar,
+    )
+    return render(request, "core/estoque.html", contexto)
+
+
+@login_required
+def alertas(request):
+    contexto = _contexto(request, "Alertas e Notificações de Estoque")
+    clinica = contexto["clinica"]
+    if not clinica:
+        return render(request, "core/alertas.html", contexto)
+
+    lotes = clinica.lotes.filter(ativo=True).select_related("apresentacao__medicamento")
+    
+    vencidos = [l for l in lotes if l.status_validade == "vencido"]
+    criticos_validade = [l for l in lotes if l.status_validade == "critico"]
+    alertas_validade = [l for l in lotes if l.status_validade == "alerta"]
+    estoque_baixo = [l for l in lotes if l.status_estoque in ["baixo", "esgotado"]]
+
+    contexto.update(
+        vencidos=vencidos,
+        criticos_validade=criticos_validade,
+        alertas_validade=alertas_validade,
+        estoque_baixo=estoque_baixo,
+        total_alertas=len(vencidos) + len(criticos_validade) + len(estoque_baixo),
+    )
+    return render(request, "core/alertas.html", contexto)
+
+
+@login_required
+def compras(request):
+    contexto = _contexto(request, "Pedidos, Compras e Recebimentos")
+    clinica = contexto["clinica"]
+    if not clinica:
+        return render(request, "core/compras.html", contexto)
+
+    hoje = timezone.localdate()
+    sessoes_proximas = clinica.sessoes.select_related("paciente", "protocolo").prefetch_related(
+        "protocolo__itens__apresentacao__medicamento"
+    ).filter(
+        data_hora__date__range=(hoje, hoje + timedelta(days=30)),
+        status__in=["agendada", "confirmada"],
+    )
+
+    linhas, _ = resumir_sessoes(sessoes_proximas)
+    necessidades = []
+    for linha in linhas:
+        apresentacao = linha["apresentacao"]
+        frascos_necessarios = linha["frascos"]
+        estoque_disponivel = sum(
+            l.quantidade_atual for l in apresentacao.lotes.filter(ativo=True)
+        )
+        falta = max(0, frascos_necessarios - estoque_disponivel)
+        necessidades.append({
+            "apresentacao": apresentacao,
+            "necessario": frascos_necessarios,
+            "estoque": estoque_disponivel,
+            "falta": falta,
+            "sugerido_compra": falta + 5 if falta > 0 else 0,
+        })
+
+    contexto.update(necessidades=necessidades)
+    return render(request, "core/compras.html", contexto)
+
+
+@login_required
+def relatorios(request):
+    contexto = _contexto(request, "Relatórios e Indicadores Administrativos")
+    clinica = contexto["clinica"]
+    if clinica:
+        lotes = clinica.lotes.filter(ativo=True)
+        total_lotes = lotes.count()
+        total_frascos_estoque = sum(l.quantidade_atual for l in lotes)
+        pacientes_ativos = clinica.pacientes.filter(ativo=True).count()
+        sessoes_realizadas_mes = clinica.sessoes.filter(
+            data_hora__month=timezone.localdate().month,
+            status="realizada",
+        ).count()
+        contexto.update(
+            total_lotes=total_lotes,
+            total_frascos_estoque=total_frascos_estoque,
+            pacientes_ativos=pacientes_ativos,
+            sessoes_realizadas_mes=sessoes_realizadas_mes,
+        )
+    return render(request, "core/relatorios.html", contexto)
+

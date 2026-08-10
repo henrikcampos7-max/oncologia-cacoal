@@ -1,0 +1,48 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<div class="card table-card">
+  <h2>Pedidos, Compras e Recebimentos</h2>
+  <p>Previsão de frascos necessários para os próximos 30 dias x estoque físico disponível.</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Medicamento / Apresentação</th>
+          <th>Necessidade (30 dias)</th>
+          <th>Estoque Disponível</th>
+          <th>Falta / Déficit</th>
+          <th>Sugestão de Compra</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in necessidades %}
+        <tr>
+          <td><strong>{{ item.apresentacao.medicamento.nome }}</strong> — {{ item.apresentacao.descricao }}</td>
+          <td>{{ item.necessario }} frascos</td>
+          <td>{{ item.estoque }} frascos</td>
+          <td>
+            {% if item.falta > 0 %}
+              <span style="color:#dc2626; font-weight:bold;">-{{ item.falta }} frascos</span>
+            {% else %}
+              <span style="color:#166534; font-weight:600;">Suficiente</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if item.sugerido_compra > 0 %}
+              <strong style="color:#2563eb;">{{ item.sugerido_compra }} frascos</strong>
+            {% else %}
+              <span style="color:#64748b;">Nenhuma compra necessária</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="5" class="empty">Nenhuma demanda calculada para os próximos 30 dias. Cadastre agendamentos na Agenda para simular compras.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

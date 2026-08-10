@@ -24,5 +24,9 @@ urlpatterns = [
     path("pacientes/", views.pacientes, name="pacientes"),
     path("medicamentos/", views.medicamentos, name="medicamentos"),
     path("quantitativo/", views.quantitativo, name="quantitativo"),
+    path("estoque/", views.estoque, name="estoque"),
+    path("alertas/", views.alertas, name="alertas"),
+    path("compras/", views.compras, name="compras"),
+    path("relatorios/", views.relatorios, name="relatorios"),
     path("modulos/<slug:slug>/", views.modulo_planejado, name="modulo_planejado"),
 ]

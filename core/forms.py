@@ -97,3 +97,56 @@ class PeriodoForm(forms.Form):
         if inicial and final and final < inicial:
             raise forms.ValidationError("A data final deve ser igual ou posterior à inicial.")
         return cleaned
+
+
+class LoteForm(forms.ModelForm):
+    class Meta:
+        from .models import Lote
+        model = Lote
+        fields = [
+            "apresentacao",
+            "numero_lote",
+            "data_validade",
+            "quantidade_inicial",
+            "estoque_minimo",
+        ]
+        widgets = {"data_validade": DateInput()}
+        labels = {
+            "apresentacao": "Apresentação do medicamento",
+            "numero_lote": "Número do lote",
+            "data_validade": "Data de validade",
+            "quantidade_inicial": "Quantidade inicial (frascos)",
+            "estoque_minimo": "Estoque mínimo recomendado",
+        }
+
+    def __init__(self, *args, clinica=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .models import Apresentacao
+        self.fields["apresentacao"].queryset = Apresentacao.objects.none()
+        if clinica:
+            self.fields["apresentacao"].queryset = Apresentacao.objects.filter(
+                medicamento__clinica=clinica, ativa=True
+            ).select_related("medicamento")
+
+
+class MovimentacaoEstoqueForm(forms.ModelForm):
+    class Meta:
+        from .models import MovimentacaoEstoque
+        model = MovimentacaoEstoque
+        fields = ["lote", "tipo", "quantidade", "observacao"]
+        labels = {
+            "lote": "Lote de medicamento",
+            "tipo": "Tipo de movimentação",
+            "quantidade": "Quantidade de frascos",
+            "observacao": "Observação / Justificativa",
+        }
+
+    def __init__(self, *args, clinica=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .models import Lote
+        self.fields["lote"].queryset = Lote.objects.none()
+        if clinica:
+            self.fields["lote"].queryset = clinica.lotes.filter(ativo=True).select_related(
+                "apresentacao__medicamento"
+            )
+

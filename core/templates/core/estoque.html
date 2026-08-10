@@ -1,0 +1,110 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<div class="two-columns">
+  {% if pode_editar %}
+  <section class="card">
+    <h2>Cadastrar Novo Lote</h2>
+    <p>Informe o lote, a apresentação e a validade para controle de estoque.</p>
+    <form method="post" class="form-grid">
+      {% csrf_token %}
+      {{ form_lote.as_p }}
+      <button class="button primary" type="submit" name="salvar_lote">＋ Salvar Lote</button>
+    </form>
+    <hr style="margin: 20px 0; border: none; border-top: 1px solid var(--border-color, #e2e8f0);">
+    <h2>Registrar Movimentação</h2>
+    <p>Entrada, saída por aplicação, perda ou ajuste de inventário.</p>
+    <form method="post" class="form-grid">
+      {% csrf_token %}
+      {{ form_movimentacao.as_p }}
+      <button class="button secondary" type="submit" name="salvar_movimentacao">⇄ Registrar Movimentação</button>
+    </form>
+  </section>
+  {% endif %}
+
+  <div style="display: flex; flex-direction: column; gap: 20px;">
+    <section class="card table-card">
+      <h2>Lotes em Estoque</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Medicamento / Apresentação</th>
+              <th>Nº Lote</th>
+              <th>Validade</th>
+              <th>Qtd. Atual</th>
+              <th>Status Validade</th>
+              <th>Status Estoque</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for lote in lotes %}
+            <tr>
+              <td><strong>{{ lote.apresentacao.medicamento.nome }}</strong> — {{ lote.apresentacao.descricao }}</td>
+              <td><code>{{ lote.numero_lote }}</code></td>
+              <td>{{ lote.data_validade|date:"d/m/Y" }}</td>
+              <td><strong>{{ lote.quantidade_atual }}</strong> frascos</td>
+              <td>
+                {% if lote.status_validade == 'vencido' %}
+                  <span class="badge danger" style="background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:4px; font-weight:600;">Vencido</span>
+                {% elif lote.status_validade == 'critico' %}
+                  <span class="badge warning" style="background:#fef3c7; color:#92400e; padding:2px 8px; border-radius:4px; font-weight:600;">Crítico (≤30d)</span>
+                {% elif lote.status_validade == 'alerta' %}
+                  <span class="badge alert" style="background:#e0f2fe; color:#075985; padding:2px 8px; border-radius:4px; font-weight:600;">Alerta (≤90d)</span>
+                {% else %}
+                  <span class="badge success" style="background:#dcfce7; color:#166534; padding:2px 8px; border-radius:4px; font-weight:600;">Válido</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if lote.status_estoque == 'esgotado' %}
+                  <span class="badge danger" style="background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:4px; font-weight:600;">Esgotado</span>
+                {% elif lote.status_estoque == 'baixo' %}
+                  <span class="badge warning" style="background:#fef3c7; color:#92400e; padding:2px 8px; border-radius:4px; font-weight:600;">Estoque Baixo</span>
+                {% else %}
+                  <span class="badge success" style="background:#dcfce7; color:#166534; padding:2px 8px; border-radius:4px; font-weight:600;">OK</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6" class="empty">Nenhum lote de medicamento cadastrado.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card table-card">
+      <h2>Últimas Movimentações</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Data/Hora</th>
+              <th>Tipo</th>
+              <th>Lote</th>
+              <th>Qtd.</th>
+              <th>Usuário</th>
+              <th>Obs.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for mov in movimentacoes %}
+            <tr>
+              <td>{{ mov.data_hora|date:"d/m/Y H:i" }}</td>
+              <td><strong>{{ mov.get_tipo_display }}</strong></td>
+              <td><code>{{ mov.lote.numero_lote }}</code></td>
+              <td>
+                {% if mov.quantidade > 0 %}+{{ mov.quantidade }}{% else %}{{ mov.quantidade }}{% endif %}
+              </td>
+              <td>{{ mov.usuario.username|default:"Sistema" }}</td>
+              <td>{{ mov.observacao|default:"—" }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6" class="empty">Nenhuma movimentação registrada.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

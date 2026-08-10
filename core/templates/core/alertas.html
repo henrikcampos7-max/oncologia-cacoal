@@ -1,0 +1,128 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<div style="display: flex; flex-direction: column; gap: 20px;">
+  <div class="card" style="background: var(--surface, #ffffff); padding: 20px;">
+    <h2>Resumo de Alertas de Estoque e Validades</h2>
+    <p>Monitoramento preventivo para segurança no atendimento aos pacientes da clínica.</p>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px;">
+      <div style="background:#fee2e2; border-left:4px solid #dc2626; padding:15px; border-radius:6px;">
+        <div style="font-size:24px; font-weight:bold; color:#991b1b;">{{ vencidos|length }}</div>
+        <div style="color:#7f1d1d; font-size:14px;">Lotes Vencidos</div>
+      </div>
+      <div style="background:#fef3c7; border-left:4px solid #d97706; padding:15px; border-radius:6px;">
+        <div style="font-size:24px; font-weight:bold; color:#92400e;">{{ criticos_validade|length }}</div>
+        <div style="color:#78350f; font-size:14px;">Vencimento Crítico (≤30 dias)</div>
+      </div>
+      <div style="background:#e0f2fe; border-left:4px solid #0284c7; padding:15px; border-radius:6px;">
+        <div style="font-size:24px; font-weight:bold; color:#075985;">{{ alertas_validade|length }}</div>
+        <div style="color:#0c4a6e; font-size:14px;">Alerta de Validade (≤90 dias)</div>
+      </div>
+      <div style="background:#f3e8ff; border-left:4px solid #9333ea; padding:15px; border-radius:6px;">
+        <div style="font-size:24px; font-weight:bold; color:#6b21a8;">{{ estoque_baixo|length }}</div>
+        <div style="color:#581c87; font-size:14px;">Lotes com Estoque Baixo / Esgotado</div>
+      </div>
+    </div>
+  </div>
+
+  {% if vencidos %}
+  <section class="card table-card">
+    <h2 style="color: #dc2626;">⚠ Lotes Vencidos (Ação Imediata Necessária)</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Medicamento / Apresentação</th>
+            <th>Nº Lote</th>
+            <th>Data de Validade</th>
+            <th>Qtd. Atual</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for lote in vencidos %}
+          <tr>
+            <td><strong>{{ lote.apresentacao.medicamento.nome }}</strong> — {{ lote.apresentacao.descricao }}</td>
+            <td><code>{{ lote.numero_lote }}</code></td>
+            <td style="color:#dc2626; font-weight:bold;">{{ lote.data_validade|date:"d/m/Y" }}</td>
+            <td>{{ lote.quantidade_atual }} frascos</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if criticos_validade %}
+  <section class="card table-card">
+    <h2 style="color: #d97706;">⚡ Validade Crítica (Próximos 30 dias)</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Medicamento / Apresentação</th>
+            <th>Nº Lote</th>
+            <th>Data de Validade</th>
+            <th>Dias Restantes</th>
+            <th>Qtd. Atual</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for lote in criticos_validade %}
+          <tr>
+            <td><strong>{{ lote.apresentacao.medicamento.nome }}</strong> — {{ lote.apresentacao.descricao }}</td>
+            <td><code>{{ lote.numero_lote }}</code></td>
+            <td>{{ lote.data_validade|date:"d/m/Y" }}</td>
+            <td><strong>{{ lote.dias_para_vencer }} dias</strong></td>
+            <td>{{ lote.quantidade_atual }} frascos</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if estoque_baixo %}
+  <section class="card table-card">
+    <h2 style="color: #9333ea;">📦 Lotes em Nível Mínimo / Esgotado</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Medicamento / Apresentação</th>
+            <th>Nº Lote</th>
+            <th>Qtd. Atual</th>
+            <th>Mínimo Recomendado</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for lote in estoque_baixo %}
+          <tr>
+            <td><strong>{{ lote.apresentacao.medicamento.nome }}</strong> — {{ lote.apresentacao.descricao }}</td>
+            <td><code>{{ lote.numero_lote }}</code></td>
+            <td><strong>{{ lote.quantidade_atual }}</strong> frascos</td>
+            <td>{{ lote.estoque_minimo }} frascos</td>
+            <td>
+              {% if lote.quantidade_atual == 0 %}
+                <span class="badge danger" style="background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:4px; font-weight:600;">Esgotado</span>
+              {% else %}
+                <span class="badge warning" style="background:#fef3c7; color:#92400e; padding:2px 8px; border-radius:4px; font-weight:600;">Estoque Baixo</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if not vencidos and not criticos_validade and not estoque_baixo %}
+  <div class="card" style="text-align: center; padding: 40px; color: #166534; background: #f0fdf4;">
+    <h3>✓ Nenhum alerta crítico no momento!</h3>
+    <p>Todos os lotes de medicamentos estão com validades e níveis de estoque em conformidade.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

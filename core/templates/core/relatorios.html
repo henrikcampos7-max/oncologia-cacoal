@@ -1,0 +1,27 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<div style="display: flex; flex-direction: column; gap: 20px;">
+  <div class="card">
+    <h2>Indicadores Gerais da Clínica</h2>
+    <p>Resumo operacional e administrativo de Oncologia.</p>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 20px;">
+      <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:20px; border-radius:8px; text-align:center;">
+        <div style="font-size:32px; font-weight:bold; color:#0f172a;">{{ pacientes_ativos|default:0 }}</div>
+        <div style="color:#64748b; font-size:14px; margin-top:4px;">Pacientes Ativos</div>
+      </div>
+      <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:20px; border-radius:8px; text-align:center;">
+        <div style="font-size:32px; font-weight:bold; color:#0284c7;">{{ total_lotes|default:0 }}</div>
+        <div style="color:#64748b; font-size:14px; margin-top:4px;">Lotes Cadastrados</div>
+      </div>
+      <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:20px; border-radius:8px; text-align:center;">
+        <div style="font-size:32px; font-weight:bold; color:#16a34a;">{{ total_frascos_estoque|default:0 }}</div>
+        <div style="color:#64748b; font-size:14px; margin-top:4px;">Total de Frascos em Estoque</div>
+      </div>
+      <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:20px; border-radius:8px; text-align:center;">
+        <div style="font-size:32px; font-weight:bold; color:#9333ea;">{{ sessoes_realizadas_mes|default:0 }}</div>
+        <div style="color:#64748b; font-size:14px; margin-top:4px;">Aplicações Realizadas (Mês Atual)</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

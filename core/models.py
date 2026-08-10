@@ -256,3 +256,21 @@ class MovimentacaoEstoque(models.Model):
     def __str__(self):
         return f"{self.get_tipo_display()} — {abs(self.quantidade)} un. ({self.lote.numero_lote})"
 
+
+class RegistroAuditoria(models.Model):
+    clinica = models.ForeignKey(Clinica, on_delete=models.CASCADE, related_name="auditorias")
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    acao = models.CharField(max_length=120)
+    detalhes = models.TextField(blank=True)
+    ip_origem = models.GenericIPAddressField(null=True, blank=True)
+    data_hora = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-data_hora"]
+
+    def __str__(self):
+        return f"[{self.data_hora:%d/%m/%Y %H:%M}] {self.usuario} — {self.acao}"
+
+

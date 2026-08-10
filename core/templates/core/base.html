@@ -26,7 +26,7 @@
         <a class="{% if request.resolver_match.kwargs.slug == 'importacoes' %}active{% endif %}" href="{% url 'modulo_planejado' 'importacoes' %}">⇧ <span>Importações</span></a>
         <a class="{% if request.resolver_match.url_name == 'alertas' %}active{% endif %}" href="{% url 'alertas' %}">△ <span>Alertas</span></a>
         <a class="{% if request.resolver_match.url_name == 'relatorios' %}active{% endif %}" href="{% url 'relatorios' %}">▨ <span>Relatórios</span></a>
-        <a class="{% if request.resolver_match.kwargs.slug == 'auditoria' %}active{% endif %}" href="{% url 'modulo_planejado' 'auditoria' %}">◎ <span>Permissões e Auditoria</span></a>
+        <a class="{% if request.resolver_match.url_name == 'auditoria' %}active{% endif %}" href="{% url 'auditoria' %}">◎ <span>Permissões e Auditoria</span></a>
       </nav>
       <div class="sidebar-footer">
         <small>{{ request.user.get_full_name|default:request.user.username }}</small>

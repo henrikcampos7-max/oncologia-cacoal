@@ -10,6 +10,7 @@ from .models import (
     Paciente,
     PerfilUsuario,
     Protocolo,
+    RegistroAuditoria,
     SessaoTratamento,
 )
 
@@ -80,6 +81,13 @@ class MovimentacaoEstoqueAdmin(admin.ModelAdmin):
     list_display = ("lote", "tipo", "quantidade", "usuario", "data_hora")
     list_filter = ("clinica", "tipo")
     search_fields = ("lote__numero_lote", "lote__apresentacao__medicamento__nome")
+
+
+@admin.register(RegistroAuditoria)
+class RegistroAuditoriaAdmin(admin.ModelAdmin):
+    list_display = ("data_hora", "usuario", "acao", "clinica")
+    list_filter = ("clinica", "acao")
+    search_fields = ("usuario__username", "acao", "detalhes")
 
 
 admin.site.site_header = "Oncologia Cacoal — Administração"

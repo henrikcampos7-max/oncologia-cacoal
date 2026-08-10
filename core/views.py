@@ -18,7 +18,16 @@ from .forms import (
     PeriodoForm,
     SessaoTratamentoForm,
 )
-from .models import Apresentacao, Lote, Medicamento, MovimentacaoEstoque, Paciente, PerfilUsuario, SessaoTratamento
+from .models import (
+    Apresentacao,
+    Lote,
+    Medicamento,
+    MovimentacaoEstoque,
+    Paciente,
+    PerfilUsuario,
+    RegistroAuditoria,
+    SessaoTratamento,
+)
 from .services import processar_baixa_estoque_sessao, resumir_sessoes
 
 
@@ -437,4 +446,19 @@ def relatorios(request):
             sessoes_realizadas_mes=sessoes_realizadas_mes,
         )
     return render(request, "core/relatorios.html", contexto)
+
+
+@login_required
+def auditoria(request):
+    contexto = _contexto(request, "Usuários, Permissões e Trilhas de Auditoria")
+    clinica = contexto["clinica"]
+    if not clinica:
+        return render(request, "core/auditoria.html", contexto)
+
+    registros = clinica.auditorias.select_related("usuario").order_by("-data_hora")[:50]
+    perfis = clinica.perfis.select_related("usuario").order_by("usuario__username")
+
+    contexto.update(registros=registros, perfis=perfis)
+    return render(request, "core/auditoria.html", contexto)
+
 

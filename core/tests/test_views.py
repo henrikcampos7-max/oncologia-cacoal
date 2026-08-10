@@ -47,3 +47,8 @@ class CoreViewsTests(TestCase):
     def test_relatorios_view_accessible(self):
         response = self.client.get(reverse("relatorios"))
         self.assertEqual(response.status_code, 200)
+
+    def test_auditoria_view_accessible(self):
+        response = self.client.get(reverse("auditoria"))
+        self.assertEqual(response.status_code, 200)
+

@@ -1,0 +1,66 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<div style="display: flex; flex-direction: column; gap: 20px;">
+  <section class="card table-card">
+    <h2>Usuários e Perfis da Clínica</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Usuário</th>
+            <th>Nome</th>
+            <th>Papel / Permissão</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in perfis %}
+          <tr>
+            <td><strong>{{ p.usuario.username }}</strong></td>
+            <td>{{ p.usuario.get_full_name|default:"—" }}</td>
+            <td><span class="badge primary" style="background:#e0e7ff; color:#3730a3; padding:2px 8px; border-radius:4px; font-weight:600;">{{ p.get_papel_display }}</span></td>
+            <td>
+              {% if p.ativo %}
+                <span class="badge success" style="background:#dcfce7; color:#166534; padding:2px 8px; border-radius:4px; font-weight:600;">Ativo</span>
+              {% else %}
+                <span class="badge danger" style="background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:4px; font-weight:600;">Inativo</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4" class="empty">Nenhum perfil cadastrado.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card table-card">
+    <h2>Trilha de Auditoria</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Data/Hora</th>
+            <th>Usuário</th>
+            <th>Ação</th>
+            <th>Detalhes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in registros %}
+          <tr>
+            <td>{{ r.data_hora|date:"d/m/Y H:i:s" }}</td>
+            <td><strong>{{ r.usuario.username|default:"Sistema" }}</strong></td>
+            <td>{{ r.acao }}</td>
+            <td>{{ r.detalhes|default:"—" }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4" class="empty">Nenhum registro de auditoria.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

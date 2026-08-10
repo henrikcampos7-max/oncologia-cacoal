@@ -29,5 +29,6 @@ urlpatterns = [
     path("alertas/", views.alertas, name="alertas"),
     path("compras/", views.compras, name="compras"),
     path("relatorios/", views.relatorios, name="relatorios"),
+    path("auditoria/", views.auditoria, name="auditoria"),
     path("modulos/<slug:slug>/", views.modulo_planejado, name="modulo_planejado"),
 ]

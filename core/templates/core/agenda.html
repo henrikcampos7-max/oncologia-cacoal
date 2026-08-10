@@ -5,11 +5,82 @@
     <div><label for="data">Data</label><input id="data" type="date" name="data" value="{{ data_filtro|date:'Y-m-d' }}"></div>
     <div><label for="paciente">Filtro nome do paciente</label><input id="paciente" name="paciente" value="{{ busca }}" placeholder="Buscar..."></div>
     <div><label for="protocolo">Filtro tratamento</label><input id="protocolo" name="protocolo" value="{{ protocolo_filtro }}" placeholder="Protocolo..."></div>
-    <div class="actions"><button class="button primary" type="submit">Filtrar</button><a class="button secondary" href="{% url 'agenda_csv' %}?data={{ data_filtro|date:'Y-m-d' }}&paciente={{ busca|urlencode }}&protocolo={{ protocolo_filtro|urlencode }}">CSV</a><a class="button secondary" href="{% url 'agenda_impressao' %}?data={{ data_filtro|date:'Y-m-d' }}" target="_blank">PDF/Imprimir</a></div>
+    <div class="actions">
+      <button class="button primary" type="submit">Filtrar</button>
+      <a class="button secondary" href="{% url 'agenda_csv' %}?data={{ data_filtro|date:'Y-m-d' }}&paciente={{ busca|urlencode }}&protocolo={{ protocolo_filtro|urlencode }}">CSV</a>
+      <a class="button secondary" href="{% url 'agenda_impressao' %}?data={{ data_filtro|date:'Y-m-d' }}" target="_blank">PDF/Imprimir</a>
+    </div>
   </form>
 </section>
-<section class="card table-card"><div class="table-wrap"><table><thead><tr><th>Hora</th><th>Paciente</th><th>Protocolo</th><th>Ciclo/Dia</th><th>Status</th></tr></thead><tbody>
-  {% for sessao in sessoes %}<tr><td>{{ sessao.data_hora|date:'H:i' }}</td><td>{{ sessao.paciente.nome }}</td><td>{{ sessao.protocolo.nome }}</td><td>{{ sessao.ciclo }}/{{ sessao.dia_ciclo }}</td><td><span class="status {{ sessao.status }}">{{ sessao.get_status_display }}</span></td></tr>{% empty %}<tr><td colspan="5" class="empty">Sem tratamentos agendados para {{ data_filtro|date:'d/m/Y' }}.</td></tr>{% endfor %}
-</tbody></table></div></section>
-{% if pode_editar %}<section class="card"><div class="section-heading"><div><h2>Próximo dia de tratamento</h2><p>Registre conforme protocolo e submeta à revisão da equipe.</p></div></div><form method="post" class="form-grid session-grid">{% csrf_token %}{{ form.as_p }}<button class="button primary" type="submit">Registrar</button></form></section>{% endif %}
+
+<section class="card table-card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Hora</th>
+          <th>Paciente</th>
+          <th>Protocolo</th>
+          <th>Ciclo/Dia</th>
+          <th>Status</th>
+          {% if pode_editar %}<th>Ações de Status</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for sessao in sessoes %}
+        <tr>
+          <td>{{ sessao.data_hora|date:'H:i' }}</td>
+          <td><strong>{{ sessao.paciente.nome }}</strong></td>
+          <td>{{ sessao.protocolo.nome }}</td>
+          <td>Ciclo {{ sessao.ciclo }} (Dia {{ sessao.dia_ciclo }})</td>
+          <td><span class="status {{ sessao.status }}">{{ sessao.get_status_display }}</span></td>
+          {% if pode_editar %}
+          <td>
+            <div style="display: flex; gap: 5px;">
+              {% if sessao.status == 'agendada' %}
+                <form method="post" action="{% url 'atualizar_status_sessao' sessao.pk %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="status" value="confirmada">
+                  <button class="button secondary small" type="submit" style="padding: 2px 8px; font-size: 12px;">Confirmar</button>
+                </form>
+              {% endif %}
+              {% if sessao.status == 'agendada' or sessao.status == 'confirmada' %}
+                <form method="post" action="{% url 'atualizar_status_sessao' sessao.pk %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="status" value="realizada">
+                  <button class="button primary small" type="submit" style="padding: 2px 8px; font-size: 12px; background: #166534; border-color: #166534;">Realizar e Baixar Estoque</button>
+                </form>
+                <form method="post" action="{% url 'atualizar_status_sessao' sessao.pk %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="status" value="cancelada">
+                  <button class="button danger small" type="submit" style="padding: 2px 8px; font-size: 12px; background: #991b1b; color: white; border: none; border-radius: 4px;">Cancelar</button>
+                </form>
+              {% endif %}
+            </div>
+          </td>
+          {% endif %}
+        </tr>
+        {% empty %}
+        <tr><td colspan="{% if pode_editar %}6{% else %}5{% endif %}" class="empty">Sem tratamentos agendados para {{ data_filtro|date:'d/m/Y' }}.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if pode_editar %}
+<section class="card">
+  <div class="section-heading">
+    <div>
+      <h2>Próximo dia de tratamento</h2>
+      <p>Registre conforme protocolo e submeta à revisão da equipe.</p>
+    </div>
+  </div>
+  <form method="post" class="form-grid session-grid">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button class="button primary" type="submit">Registrar Tratamento</button>
+  </form>
+</section>
+{% endif %}
 {% endblock %}

@@ -82,3 +82,70 @@ def resumir_sessoes(sessoes):
         )
     linhas.sort(key=lambda linha: (linha["medicamento"], linha["apresentacao"]))
     return linhas, inconsistencias
+
+
+def processar_baixa_estoque_sessao(sessao, usuario=None):
+    """
+    Processa a baixa no estoque por FEFO (First Expired, First Out) para cada item do protocolo da sessão realizada.
+    """
+    from .models import Lote, MovimentacaoEstoque
+
+    if sessao.movimentacoes_estoque.exists():
+        return True, ["Baixa de estoque já havia sido realizada para esta sessão."]
+
+    mensagens = []
+    from django.db import transaction
+
+    with transaction.atomic():
+        for item in sessao.protocolo.itens.select_related("apresentacao"):
+            if not numero_na_lista(item.ciclos, sessao.ciclo):
+                continue
+            if not numero_na_lista(item.dias_ciclo, sessao.dia_ciclo):
+                continue
+
+            dose = calcular_dose_mg(
+                item.dose_valor,
+                item.tipo_dose,
+                sessao.paciente.peso_kg,
+                sessao.paciente.altura_cm,
+            )
+            if dose is None or dose == 0:
+                continue
+
+            frascos_necessarios = calcular_frascos(dose, item.apresentacao.quantidade_mg)
+            if frascos_necessarios <= 0:
+                continue
+
+            lotes_disponiveis = Lote.objects.filter(
+                clinica=sessao.clinica,
+                apresentacao=item.apresentacao,
+                ativo=True,
+                quantidade_atual__gt=0,
+            ).order_by("data_validade")
+
+            restante = frascos_necessarios
+            for lote in lotes_disponiveis:
+                if restante <= 0:
+                    break
+                deduzir = min(lote.quantidade_atual, restante)
+                lote.quantidade_atual -= deduzir
+                lote.save()
+                restante -= deduzir
+
+                MovimentacaoEstoque.objects.create(
+                    clinica=sessao.clinica,
+                    lote=lote,
+                    tipo=MovimentacaoEstoque.TipoMovimentacao.SAIDA,
+                    quantidade=-deduzir,
+                    sessao=sessao,
+                    usuario=usuario,
+                    observacao=f"Aplicação realizada — Paciente: {sessao.paciente.nome}",
+                )
+
+            if restante > 0:
+                mensagens.append(
+                    f"Estoque insuficiente para {item.apresentacao.descricao}. Faltaram {restante} frascos."
+                )
+
+    return True, mensagens
+

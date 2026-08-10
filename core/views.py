@@ -19,7 +19,7 @@ from .forms import (
     SessaoTratamentoForm,
 )
 from .models import Apresentacao, Lote, Medicamento, MovimentacaoEstoque, Paciente, PerfilUsuario, SessaoTratamento
-from .services import resumir_sessoes
+from .services import processar_baixa_estoque_sessao, resumir_sessoes
 
 
 @never_cache
@@ -159,6 +159,33 @@ def agenda_impressao(request):
         "core/agenda_impressao.html",
         {"sessoes": sessoes, "data_filtro": data_filtro, "clinica": perfil.clinica},
     )
+
+
+@login_required
+def atualizar_status_sessao(request, pk):
+    perfil = _perfil(request)
+    if not perfil or not _pode_editar(
+        perfil, {PerfilUsuario.Papel.ADMINISTRADOR, PerfilUsuario.Papel.FARMACEUTICO, PerfilUsuario.Papel.ENFERMAGEM}
+    ):
+        return HttpResponse("Perfil sem permissão.", status=403)
+
+    sessao = SessaoTratamento.objects.filter(pk=pk, clinica=perfil.clinica).first()
+    if not sessao:
+        return HttpResponse("Sessão não encontrada.", status=404)
+
+    novo_status = request.POST.get("status")
+    if novo_status in dict(SessaoTratamento.Status.choices):
+        sessao.status = novo_status
+        sessao.save()
+        messages.success(request, f"Status da sessão atualizado para '{sessao.get_status_display()}'.")
+
+        if novo_status == SessaoTratamento.Status.REALIZADA:
+            _, msgs = processar_baixa_estoque_sessao(sessao, usuario=request.user)
+            for msg in msgs:
+                messages.warning(request, msg)
+
+    return redirect("agenda")
+
 
 
 @login_required

@@ -21,6 +21,7 @@ urlpatterns = [
     path("agenda/", views.agenda, name="agenda"),
     path("agenda/exportar.csv", views.agenda_csv, name="agenda_csv"),
     path("agenda/imprimir/", views.agenda_impressao, name="agenda_impressao"),
+    path("agenda/<int:pk>/status/", views.atualizar_status_sessao, name="atualizar_status_sessao"),
     path("pacientes/", views.pacientes, name="pacientes"),
     path("medicamentos/", views.medicamentos, name="medicamentos"),
     path("quantitativo/", views.quantitativo, name="quantitativo"),

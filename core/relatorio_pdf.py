@@ -39,10 +39,12 @@ def calcular_hash(conteudo: bytes) -> str:
 
 
 def _extrair_texto(conteudo: bytes) -> str:
+    from io import BytesIO
+
     try:
         from pypdf import PdfReader
 
-        leitor = PdfReader(conteudo)
+        leitor = PdfReader(BytesIO(conteudo))
         paginas = []
         for pagina in leitor.pages:
             try:
@@ -129,6 +131,8 @@ def extrair_relatorio(conteudo: bytes) -> dict:
         else:
             if _encontra_cabecalho_opcional(linha):
                 continue
+            if _linha_e_cabecalho_consumido(linha):
+                continue
             informativo.append(f"Linha não reconhecida: {linha.strip()[:80]}")
     if not itens:
         raise ValueError("Nenhum item de transferência reconhecido no relatório.")
@@ -148,6 +152,11 @@ def _encontra_cabecalho_opcional(linha):
     if not l:
         return True
     return any(re.search(p, l) for p in _CAMPOS_OPCIONAIS)
+
+
+def _linha_e_cabecalho_consumido(linha):
+    """Linhas que alimentam cabeçalho (referência externa / data) são silenciosas."""
+    return bool(_PADRAO_REFERENCIA.search(linha)) or bool(_PADRAO_DATA_RELATORIO.search(linha))
 
 
 def resolver_descricao(clinica, descricao):

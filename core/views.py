@@ -49,6 +49,8 @@ from .models import (
 from .services import (
     calcular_estoque_disponivel_apresentacao,
     calcular_sugestao_compras,
+    coletar_alertas_estoque,
+    enviar_alertas_por_email,
     importar_medicamentos,
     inspecionar_importacao,
     processar_baixa_estoque_sessao,
@@ -837,16 +839,30 @@ def estoque(request):
 @login_required
 def alertas(request):
     contexto = _contexto(request, "Alertas e Notificações de Estoque")
-    clinica = contexto["clinica"]
+    clinica, perfil = contexto["clinica"], contexto["perfil"]
     if not clinica:
         return render(request, "core/alertas.html", contexto)
 
-    lotes = clinica.lotes.filter(ativo=True).select_related("apresentacao__medicamento")
-    
-    vencidos = [l for l in lotes if l.status_validade == "vencido"]
-    criticos_validade = [l for l in lotes if l.status_validade == "critico"]
-    alertas_validade = [l for l in lotes if l.status_validade == "alerta"]
-    estoque_baixo = [l for l in lotes if l.status_estoque in ["baixo", "esgotado"]]
+    pode_enviar_email = _pode_editar(
+        perfil, {PerfilUsuario.Papel.ADMINISTRADOR, PerfilUsuario.Papel.FARMACEUTICO}
+    )
+    if request.method == "POST":
+        if not pode_enviar_email:
+            return HttpResponse("Perfil sem permissão para enviar alertas.", status=403)
+        destinatarios, total_alertas = enviar_alertas_por_email(
+            clinica, usuario=request.user, request=request
+        )
+        if total_alertas == 0:
+            messages.info(request, "Nenhum alerta para notificar no momento.")
+        elif destinatarios == 0:
+            messages.warning(request, "Há alertas, mas nenhum destinatário cadastrado com email.")
+        else:
+            messages.success(
+                request, f"Alertas enviados por email para {destinatarios} destinatário(s)."
+            )
+        return redirect("alertas")
+
+    vencidos, criticos_validade, alertas_validade, estoque_baixo = coletar_alertas_estoque(clinica)
 
     contexto.update(
         vencidos=vencidos,
@@ -854,6 +870,7 @@ def alertas(request):
         alertas_validade=alertas_validade,
         estoque_baixo=estoque_baixo,
         total_alertas=len(vencidos) + len(criticos_validade) + len(estoque_baixo),
+        pode_enviar_email=pode_enviar_email,
     )
     return render(request, "core/alertas.html", contexto)
 

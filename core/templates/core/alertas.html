@@ -4,6 +4,12 @@
   <div class="card" style="background: var(--surface, #ffffff); padding: 20px;">
     <h2>Resumo de Alertas de Estoque e Validades</h2>
     <p>Monitoramento preventivo para segurança no atendimento aos pacientes da clínica.</p>
+    {% if pode_enviar_email %}
+    <form method="post" style="margin-top: 12px;">
+      {% csrf_token %}
+      <button class="button primary" type="submit" name="enviar_email">Enviar alertas por email agora</button>
+    </form>
+    {% endif %}
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px;">
       <div style="background:#fee2e2; border-left:4px solid #dc2626; padding:15px; border-radius:6px;">
         <div style="font-size:24px; font-weight:bold; color:#991b1b;">{{ vencidos|length }}</div>

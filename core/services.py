@@ -365,3 +365,112 @@ def processar_baixa_estoque_sessao(sessao, usuario=None):
 
     return True, mensagens
 
+
+def coletar_alertas_estoque(clinica):
+    """Retorna (vencidos, validade_critica, validade_alerta, estoque_baixo) da clínica."""
+    lotes = clinica.lotes.filter(ativo=True).select_related("apresentacao__medicamento")
+    vencidos, criticos_validade, alertas_validade, estoque_baixo = [], [], [], []
+    for lote in lotes:
+        validade, estoque = lote.status_validade, lote.status_estoque
+        if validade == "vencido":
+            vencidos.append(lote)
+        elif validade == "critico":
+            criticos_validade.append(lote)
+        elif validade == "alerta":
+            alertas_validade.append(lote)
+        if estoque in ("baixo", "esgotado"):
+            estoque_baixo.append(lote)
+    return vencidos, criticos_validade, alertas_validade, estoque_baixo
+
+
+def coletar_faltas_recentes(clinica, limite_dias=30, minimo_faltas=2):
+    """Pacientes com faltas recorrentes no período, por ordem de quantidade."""
+    from datetime import timedelta
+
+    from django.db.models import Count
+    from django.utils import timezone
+
+    from .models import SessaoTratamento
+
+    desde = timezone.localdate() - timedelta(days=limite_dias)
+    return list(
+        SessaoTratamento.objects.filter(
+            clinica=clinica,
+            status=SessaoTratamento.Status.FALTOU,
+            data_hora__date__gte=desde,
+        )
+        .values("paciente__id", "paciente__nome")
+        .annotate(total=Count("id"))
+        .filter(total__gte=minimo_faltas)
+        .order_by("-total")
+    )
+
+
+def enviar_alertas_por_email(clinica, usuario=None, request=None):
+    """Envia um resumo dos alertas da clínica para administradores e farmacêuticos.
+
+    Retorna (quantidade_de_destinatarios, total_de_alertas).
+    """
+    from django.core.mail import send_mail
+
+    from .models import PerfilUsuario
+
+    vencidos, criticos_validade, alertas_validade, estoque_baixo = coletar_alertas_estoque(clinica)
+    faltas = coletar_faltas_recentes(clinica)
+    total_alertas = len(vencidos) + len(criticos_validade) + len(estoque_baixo) + len(faltas)
+    if total_alertas == 0:
+        return 0, 0
+
+    destinatarios = list(
+        PerfilUsuario.objects.filter(
+            clinica=clinica,
+            ativo=True,
+            papel__in=[PerfilUsuario.Papel.ADMINISTRADOR, PerfilUsuario.Papel.FARMACEUTICO],
+        )
+        .exclude(usuario__email="")
+        .values_list("usuario__email", flat=True)
+        .distinct()
+    )
+    if not destinatarios:
+        return 0, total_alertas
+
+    linhas = []
+    if vencidos:
+        linhas.append(f"Lotes VENCIDOS ({len(vencidos)}):")
+        linhas += [
+            f"- {lote.apresentacao} — Lote {lote.numero_lote} (validade {lote.data_validade:%d/%m/%Y})"
+            for lote in vencidos[:10]
+        ]
+    if criticos_validade:
+        linhas.append(f"Validade crítica em até 30 dias ({len(criticos_validade)}):")
+        linhas += [
+            f"- {lote.apresentacao} — Lote {lote.numero_lote} (validade {lote.data_validade:%d/%m/%Y})"
+            for lote in criticos_validade[:10]
+        ]
+    if estoque_baixo:
+        linhas.append(f"Estoque baixo ou esgotado ({len(estoque_baixo)}):")
+        linhas += [
+            f"- {lote.apresentacao} — Lote {lote.numero_lote} (atual: {lote.quantidade_atual} frascos)"
+            for lote in estoque_baixo[:10]
+        ]
+    if faltas:
+        linhas.append(f"Pacientes com faltas recorrentes nos últimos 30 dias ({len(faltas)}):")
+        linhas += [f"- {item['paciente__nome']} ({item['total']} falta(s))" for item in faltas]
+
+    corpo = f"Resumo de alertas — {clinica.nome}\n\n" + "\n".join(linhas)
+    send_mail(
+        subject=f"[Oncologia Cacoal] {total_alertas} alerta(s) em {clinica.nome}",
+        message=corpo,
+        from_email=None,
+        recipient_list=destinatarios,
+        fail_silently=True,
+    )
+    registrar_auditoria(
+        clinica,
+        usuario,
+        "Envio de alertas por email",
+        f"Enviado para {len(destinatarios)} destinatário(s) com {total_alertas} alerta(s).",
+        request=request,
+    )
+    return len(destinatarios), total_alertas
+

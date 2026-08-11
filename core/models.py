@@ -500,6 +500,7 @@ class StatusReconciliacao(models.TextChoices):
     DIVERGENCIA_QUANTIDADE = "divergencia_quantidade", "Divergência de quantidade"
     VALIDADE_NAO_IDENTIFICADA = "validade_nao_identificada", "Validade não identificada"
     VALIDADE_CRITICA = "validade_critica", "Validade crítica"
+    DIVERGENCIA_VALIDADE = "divergencia_validade", "Validade divergente/vencida"
     ITEM_NAO_PREVISTO = "item_nao_previsto", "Item não previsto"
     POSSIVEL_DUPLICIDADE = "possivel_duplicidade", "Possível duplicidade"
     FOTO_INSUFICIENTE = "foto_insuficiente", "Foto insuficiente"

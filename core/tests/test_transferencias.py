@@ -151,3 +151,87 @@ class TransferenciaFlowTests(TestCase):
         transferencia.refresh_from_db()
         self.assertEqual(transferencia.status, Transferencia.Status.RECEBIDA)
         self.assertIsNotNone(transferencia.data_recebimento)
+
+    def test_recebe_transferencia_importada_direto_do_rascunho(self):
+        usuario_destino = get_user_model().objects.create_user(
+            username="destinoimport", password="Password123456789!"
+        )
+        PerfilUsuario.objects.create(
+            usuario=usuario_destino,
+            clinica=self.clinica_destino,
+            papel=PerfilUsuario.Papel.ADMINISTRADOR,
+            ativo=True,
+        )
+        self.client.login(username="destinoimport", password="Password123456789!")
+
+        transferencia = Transferencia.objects.create(
+            clinica_origem=self.clinica_origem,
+            clinica_destino=self.clinica_destino,
+            numero="TR-JP-2026-0003",
+            importada=True,
+            status=Transferencia.Status.RASCUNHO,
+        )
+        item = ItemTransferencia.objects.create(
+            transferencia=transferencia, apresentacao=self.apresentacao, quantidade=6
+        )
+        hoje = timezone.localdate().isoformat()
+        response = self.client.post(
+            reverse("detalhe_transferencia", kwargs={"pk": transferencia.pk}),
+            {
+                "acao": "receber",
+                f"recebido_{item.pk}": "6",
+                f"lote_{item.pk}": "LOT-JP-2026",
+                f"validade_{item.pk}": hoje,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        item.refresh_from_db()
+        self.assertEqual(item.quantidade_recebida, 6)
+        lote_destino = Lote.objects.get(numero_lote="LOT-JP-2026")
+        self.assertEqual(lote_destino.clinica, self.clinica_destino)
+        self.assertEqual(lote_destino.quantidade_atual, 6)
+        transferencia.refresh_from_db()
+        self.assertEqual(transferencia.status, Transferencia.Status.RECEBIDA)
+        self.assertIsNotNone(transferencia.data_recebimento)
+        self.assertTrue(
+            MovimentacaoEstoque.objects.filter(
+                clinica=self.clinica_destino,
+                tipo=MovimentacaoEstoque.TipoMovimentacao.ENTRADA,
+                lote=lote_destino,
+            ).exists()
+        )
+
+    def test_nao_recebe_transferencia_local_em_rascunho(self):
+        usuario_destino = get_user_model().objects.create_user(
+            username="destino2", password="Password123456789!"
+        )
+        PerfilUsuario.objects.create(
+            usuario=usuario_destino,
+            clinica=self.clinica_destino,
+            papel=PerfilUsuario.Papel.ADMINISTRADOR,
+            ativo=True,
+        )
+        self.client.login(username="destino2", password="Password123456789!")
+
+        transferencia = Transferencia.objects.create(
+            clinica_origem=self.clinica_origem,
+            clinica_destino=self.clinica_destino,
+            numero="TR-TESTE-0003",
+            status=Transferencia.Status.RASCUNHO,
+        )
+        item = ItemTransferencia.objects.create(
+            transferencia=transferencia, apresentacao=self.apresentacao, quantidade=6
+        )
+        response = self.client.post(
+            reverse("detalhe_transferencia", kwargs={"pk": transferencia.pk}),
+            {
+                "acao": "receber",
+                f"recebido_{item.pk}": "6",
+                f"lote_{item.pk}": "LOT-INVALIDO",
+                f"validade_{item.pk}": timezone.localdate().isoformat(),
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        transferencia.refresh_from_db()
+        self.assertEqual(transferencia.status, Transferencia.Status.RASCUNHO)
+        self.assertFalse(Lote.objects.filter(numero_lote="LOT-INVALIDO").exists())

@@ -22,6 +22,7 @@
         <a class="{% if request.resolver_match.url_name == 'protocolos' %}active{% endif %}" href="{% url 'protocolos' %}">◆ <span>Protocolos</span></a>
         <a class="{% if request.resolver_match.url_name == 'quantitativo' %}active{% endif %}" href="{% url 'quantitativo' %}">▤ <span>Quantitativo e Previsão</span></a>
         <a class="{% if request.resolver_match.url_name == 'estoque' %}active{% endif %}" href="{% url 'estoque' %}">▥ <span>Estoque e Validades</span></a>
+        <a class="{% if request.resolver_match.url_name == 'sobras' %}active{% endif %}" href="{% url 'sobras' %}">⇌ <span>Sobras Reais</span></a>
         <a class="{% if request.resolver_match.url_name == 'transferencias' %}active{% endif %}" href="{% url 'transferencias' %}">⇄ <span>Transferências</span></a>
         <a class="{% if request.resolver_match.url_name == 'compras' %}active{% endif %}" href="{% url 'compras' %}">▧ <span>Compras e Recebimentos</span></a>
         <a class="{% if request.resolver_match.url_name == 'importacoes' %}active{% endif %}" href="{% url 'importacoes' %}">⇧ <span>Importações</span></a>

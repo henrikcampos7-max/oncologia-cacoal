@@ -2,8 +2,8 @@
 {% block content %}
 {% if resultado_importacao %}
 <section class="card">
-  <h2>Resultado da importação</h2>
-  <p><strong>Importadas:</strong> {{ resultado_importacao.importadas }} · <strong>Com erro:</strong> {{ resultado_importacao.com_erro }}</p>
+  <h2>Resultado da importação {% if resultado_importacao.tipo %}— {{ resultado_importacao.tipo|capfirst }}{% endif %}</h2>
+  <p><strong>Importadas:</strong> {{ resultado_importacao.importadas }} · <strong>Com erro:</strong> {{ resultado_importacao.com_erro }}{% if resultado_importacao.duplicadas is not None %} · <strong>Duplicadas ignoradas:</strong> {{ resultado_importacao.duplicadas }}{% endif %}</p>
   {% if resultado_importacao.erros %}
   <h3>Erros ({{ resultado_importacao.erros|length }})</h3>
   <ul>
@@ -15,7 +15,7 @@
 {% else %}
 <section class="card">
   <h2>Preparação — {{ nome_arquivo }}</h2>
-  <p>Selecione a aba, mapeie as colunas da planilha para os campos do sistema e confirme. A prévia mostra as primeiras 5 linhas (cabeçalho ignorado).</p>
+  <p>Tipo: <strong>{{ tipo|capfirst }}</strong>. Selecione a aba, mapeie as colunas da planilha para os campos do sistema e confirme. A prévia mostra as primeiras 5 linhas (cabeçalho ignorado).</p>
   <form method="post">
     {% csrf_token %}
     <label>Aba da planilha
@@ -36,6 +36,7 @@
       </div>
       <h3>Mapeamento das colunas</h3>
       <div class="form-grid">
+        {% if tipo == "medicamentos" or tipo == "gmed" %}
         <label>Nome do medicamento *
           <select name="map_nome" required>
             <option value="">— não mapeado —</option>
@@ -66,6 +67,50 @@
             {% for coluna in aba.colunas %}{% if coluna %}<option value="{{ forloop.counter0 }}">{{ coluna }}</option>{% endif %}{% endfor %}
           </select>
         </label>
+        {% else %}
+        <label>Número do documento (transferência) *
+          <select name="map_numero" required>
+            <option value="">— não mapeado —</option>
+            {% for coluna in aba.colunas %}{% if coluna %}<option value="{{ forloop.counter0 }}">{{ coluna }}</option>{% endif %}{% endfor %}
+          </select>
+        </label>
+        <label>Data do documento
+          <select name="map_data">
+            <option value="">— não mapeado —</option>
+            {% for coluna in aba.colunas %}{% if coluna %}<option value="{{ forloop.counter0 }}">{{ coluna }}</option>{% endif %}{% endfor %}
+          </select>
+        </label>
+        <label>Medicamento (nome) *
+          <select name="map_medicamento" required>
+            <option value="">— não mapeado —</option>
+            {% for coluna in aba.colunas %}{% if coluna %}<option value="{{ forloop.counter0 }}">{{ coluna }}</option>{% endif %}{% endfor %}
+          </select>
+        </label>
+        <label>Apresentação (descrição, opcional)
+          <select name="map_descricao">
+            <option value="">— não mapeado —</option>
+            {% for coluna in aba.colunas %}{% if coluna %}<option value="{{ forloop.counter0 }}">{{ coluna }}</option>{% endif %}{% endfor %}
+          </select>
+        </label>
+        <label>Quantidade (frascos) *
+          <select name="map_quantidade" required>
+            <option value="">— não mapeado —</option>
+            {% for coluna in aba.colunas %}{% if coluna %}<option value="{{ forloop.counter0 }}">{{ coluna }}</option>{% endif %}{% endfor %}
+          </select>
+        </label>
+        <label>Lote
+          <select name="map_lote">
+            <option value="">— não mapeado —</option>
+            {% for coluna in aba.colunas %}{% if coluna %}<option value="{{ forloop.counter0 }}">{{ coluna }}</option>{% endif %}{% endfor %}
+          </select>
+        </label>
+        <label>Validade
+          <select name="map_validade">
+            <option value="">— não mapeado —</option>
+            {% for coluna in aba.colunas %}{% if coluna %}<option value="{{ forloop.counter0 }}">{{ coluna }}</option>{% endif %}{% endfor %}
+          </select>
+        </label>
+        {% endif %}
       </div>
     </details>
     {% endfor %}

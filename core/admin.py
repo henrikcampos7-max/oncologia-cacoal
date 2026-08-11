@@ -16,6 +16,7 @@ from .models import (
     Protocolo,
     RegistroAuditoria,
     SessaoTratamento,
+    SobraReal,
     SolicitacaoAcesso,
     Transferencia,
 )
@@ -134,6 +135,22 @@ class ImportacaoArquivoAdmin(admin.ModelAdmin):
     list_display = ("nome_arquivo", "clinica", "aba", "importadas", "com_erro", "data_hora")
     list_filter = ("clinica",)
     search_fields = ("nome_arquivo", "aba")
+
+
+@admin.register(SobraReal)
+class SobraRealAdmin(admin.ModelAdmin):
+    list_display = (
+        "apresentacao",
+        "quantidade_mg",
+        "status",
+        "paciente_origem",
+        "paciente_destino",
+        "limite_estabilidade",
+        "criada_em",
+    )
+    list_filter = ("clinica", "status")
+    search_fields = ("apresentacao__medicamento__nome", "lote__codigo")
+    readonly_fields = ("status", "data_reutilizacao", "data_descarte", "criada_por", "criada_em")
 
 
 admin.site.site_header = "Oncologia Cacoal — Administração"

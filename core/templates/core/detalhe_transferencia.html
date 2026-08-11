@@ -40,10 +40,16 @@
   </div>
 </section>
 
-{% if transferencia.status == 'em_transito' and e_destino and pode_editar %}
+{% if e_destino and pode_editar %}
+  {% if transferencia.status == 'em_transito' or recebivel_importada %}
 <section class="card">
+  {% if recebivel_importada %}
+  <h2>Registrar recebimento (transferência importada)</h2>
+  <p>Documento emitido por {{ transferencia.clinica_origem.nome }} — o estoque não foi baixado na origem por este sistema. Confirme os itens e registre o recebimento com lote e validade.</p>
+  {% else %}
   <h2>Registrar recebimento</h2>
   <p>Confirme as quantidades recebidas. Informe lote e validade para criar os lotes no estoque de destino.</p>
+  {% endif %}
   <form method="post">
     {% csrf_token %}
     <div class="table-wrap">
@@ -66,5 +72,6 @@
     <button class="button primary" type="submit" name="acao" value="receber">Registrar recebimento</button>
   </form>
 </section>
+  {% endif %}
 {% endif %}
 {% endblock %}

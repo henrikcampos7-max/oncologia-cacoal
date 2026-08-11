@@ -122,6 +122,27 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "branding"]
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+MEDIA_URL = "media/"
+MEDIA_ROOT = os.getenv("DJANGO_MEDIA_ROOT", str(BASE_DIR / "media"))
+
+# Módulo de conferência de transferências (Ji-Paraná → Cacoal).
+# Limites de confiança e engine de extração; valores administráveis por env.
+TRANSFER_CONFERENCE_CONFIG = {
+    # Política de confiança por campo (SKILL 21/22): valores de referência.
+    "confianca": {
+        "alta": 0.95,
+        "revisao_recomendada": 0.80,
+        "revisao_obrigatoria": 0.0,
+    },
+    # Provider de extração visual. "mock" (determinístico, para testes/manual)
+    # é o padrão; "manual" exige entrada humana; providers externos plugam aqui.
+    "vision_provider": os.getenv("TRANSFER_VISION_PROVIDER", "mock"),
+    "vision_timeout_segundos": int(os.getenv("TRANSFER_VISION_TIMEOUT", "60")),
+    "tamanho_maximo_evidencia_mb": 10,
+    "imagens_permitidas": ("png", "jpg", "jpeg", "webp"),
+    "validade_critica_dias": 30,
+}
+
 EMAIL_BACKEND = os.getenv(
     "DJANGO_EMAIL_BACKEND",
     "django.core.mail.backends.console.EmailBackend" if DEBUG else "django.core.mail.backends.smtp.EmailBackend",

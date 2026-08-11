@@ -406,6 +406,19 @@ class Transferencia(models.Model):
         RECEBIDA = "recebida", "Recebida"
         CANCELADA = "cancelada", "Cancelada"
 
+    class StatusConferencia(models.TextChoices):
+        RASCUNHO = "rascunho", "Rascunho"
+        RELATORIO_IMPORTADO = "relatorio_importado", "Relatório importado"
+        EM_TRANSITO = "em_transito", "Em trânsito"
+        AGUARDANDO_RECEBIMENTO = "aguardando_recebimento", "Aguardando recebimento"
+        EM_CONFERENCIA = "em_conferencia", "Em conferência"
+        PENDENCIA_MANUAL = "pendencia_manual", "Pendência manual"
+        DIVERGENCIA = "divergencia", "Divergência"
+        PRONTA_PARA_APROVACAO = "pronta_para_aprovacao", "Pronta para aprovação"
+        APROVADA = "aprovada", "Aprovada"
+        INTEGRADA_AO_ESTOQUE = "integrada_ao_estoque", "Integrada ao estoque"
+        CANCELADA = "cancelada", "Cancelada"
+
     clinica_origem = models.ForeignKey(
         Clinica, on_delete=models.PROTECT, related_name="transferencias_enviadas"
     )
@@ -413,6 +426,37 @@ class Transferencia(models.Model):
         Clinica, on_delete=models.PROTECT, related_name="transferencias_recebidas"
     )
     numero = models.CharField(max_length=30)
+    importada = models.BooleanField(
+        default=False,
+        help_text="Verdadeiro quando a transferência veio de importação de planilha (Ji-Paraná).",
+    )
+    relatorio_arquivo = models.FileField(
+        upload_to="transferencias/relatorios/",
+        null=True,
+        blank=True,
+        help_text="PDF original do relatório de transferência (Ji-Paraná).",
+    )
+    hash_relatorio = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="SHA-256 do arquivo do relatório (evita importação duplicada).",
+    )
+    data_relatorio = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Data de emissão do relatório de transferência.",
+    )
+    referencia_externa = models.CharField(
+        max_length=120,
+        blank=True,
+        help_text="Número identificador do documento / referência externa.",
+    )
+    status_conferencia = models.CharField(
+        max_length=30,
+        choices=StatusConferencia.choices,
+        default=StatusConferencia.RASCUNHO,
+        help_text="Estado do fluxo de conferência automatizada do recebimento.",
+    )
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.RASCUNHO)
     criado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
@@ -444,6 +488,23 @@ class Transferencia(models.Model):
         return f"TR-{ano}-{sequencia:04d}"
 
 
+class StatusReconciliacao(models.TextChoices):
+    """Status da conferência automatizada de itens de transferência (SKILLS 17–22)."""
+
+    CONFORME = "conforme", "Conforme"
+    NAO_FOTOGRAFADO = "nao_fotografado", "Não fotografado"
+    CONFERENCIA_MANUAL = "conferencia_manual", "Conferência manual"
+    DIVERGENCIA_PRODUTO = "divergencia_produto", "Divergência de produto"
+    DIVERGENCIA_APRESENTACAO = "divergencia_apresentacao", "Divergência de apresentação"
+    DIVERGENCIA_LOTE = "divergencia_lote", "Divergência de lote"
+    DIVERGENCIA_QUANTIDADE = "divergencia_quantidade", "Divergência de quantidade"
+    VALIDADE_NAO_IDENTIFICADA = "validade_nao_identificada", "Validade não identificada"
+    VALIDADE_CRITICA = "validade_critica", "Validade crítica"
+    ITEM_NAO_PREVISTO = "item_nao_previsto", "Item não previsto"
+    POSSIVEL_DUPLICIDADE = "possivel_duplicidade", "Possível duplicidade"
+    FOTO_INSUFICIENTE = "foto_insuficiente", "Foto insuficiente"
+
+
 class ItemTransferencia(models.Model):
     transferencia = models.ForeignKey(
         Transferencia, on_delete=models.CASCADE, related_name="itens"
@@ -451,6 +512,12 @@ class ItemTransferencia(models.Model):
     apresentacao = models.ForeignKey(Apresentacao, on_delete=models.PROTECT)
     quantidade = models.PositiveIntegerField()
     quantidade_recebida = models.PositiveIntegerField(default=0)
+    status_reconciliacao = models.CharField(
+        max_length=28,
+        choices=StatusReconciliacao.choices,
+        default=StatusReconciliacao.NAO_FOTOGRAFADO,
+        help_text="Status da conferência automatizada (mantido em sincronia com a reconciliação).",
+    )
 
     def __str__(self):
         return f"{self.transferencia.numero} — {self.apresentacao} x {self.quantidade}"
@@ -488,6 +555,17 @@ class SolicitacaoAcesso(models.Model):
 
 
 class ImportacaoArquivo(models.Model):
+    class Tipo(models.TextChoices):
+        MEDICAMENTOS = "medicamentos", "Medicamentos"
+        GMED = "gmed", "GMED"
+        TRANSFERENCIAS = "transferencias", "Transferências"
+
+    tipo = models.CharField(
+        max_length=20,
+        choices=Tipo.choices,
+        default=Tipo.MEDICAMENTOS,
+        help_text="Origem/destino da importação (catálogo, GMED ou transferências de Ji-Paraná).",
+    )
     clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name="importacoes")
     nome_arquivo = models.CharField(max_length=255)
     aba = models.CharField(max_length=120)
@@ -505,5 +583,308 @@ class ImportacaoArquivo(models.Model):
 
     def __str__(self):
         return f"{self.nome_arquivo} — {self.aba} ({self.importadas} importadas)"
+
+
+class SobraReal(models.Model):
+    """Sobra fisicamente existente após uma manipulação/atendimento realizado.
+
+    Nunca altera o estoque físico; é usada para rastreabilidade operacional e,
+    quando disponível, entra no pool do motor de sobras projetadas via
+    `sobras_iniciais`.
+    """
+
+    class Status(models.TextChoices):
+        DISPONIVEL = "disponivel", "Disponível"
+        REUTILIZADA = "reutilizada", "Reutilizada"
+        EXPIROU = "expirada", "Expirada"
+        DESCARTADA = "descartada", "Descartada"
+
+    clinica = models.ForeignKey(
+        Clinica, on_delete=models.PROTECT, related_name="sobras_reais"
+    )
+    apresentacao = models.ForeignKey(
+        Apresentacao, on_delete=models.PROTECT, related_name="sobras_reais"
+    )
+    quantidade_mg = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        validators=[MinValueValidator(Decimal("0.001"))],
+        help_text="Quantidade de sobra em mg.",
+    )
+    lote = models.ForeignKey(
+        Lote, on_delete=models.SET_NULL, null=True, blank=True, related_name="sobras_reais"
+    )
+    paciente_origem = models.ForeignKey(
+        Paciente,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="sobras_geradas",
+    )
+    data_abertura = models.DateTimeField()
+    limite_estabilidade = models.DateTimeField(
+        null=True, blank=True, help_text="Calculado a partir da estabilidade cadastrada da apresentação."
+    )
+    condicoes_armazenamento = models.CharField(max_length=200, blank=True)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.DISPONIVEL)
+    paciente_destino = models.ForeignKey(
+        Paciente,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="sobras_recebidas",
+    )
+    data_reutilizacao = models.DateTimeField(null=True, blank=True)
+    motivo_descarte = models.CharField(max_length=300, blank=True)
+    data_descarte = models.DateTimeField(null=True, blank=True)
+    criada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    criada_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-criada_em"]
+
+    def __str__(self):
+        return f"{self.apresentacao} — {self.quantidade_mg} mg ({self.get_status_display()})"
+
+    @property
+    def dentro_da_estabilidade(self):
+        if self.limite_estabilidade is None:
+            return False
+        return timezone.now() <= self.limite_estabilidade
+
+    def reutilizar(self, paciente_destino, usuario):
+        if self.status != self.Status.DISPONIVEL:
+            raise ValueError("Somente sobras disponíveis podem ser reutilizadas.")
+        if not self.dentro_da_estabilidade:
+            raise ValueError("Sobra fora do prazo de estabilidade.")
+        self.status = self.Status.REUTILIZADA
+        self.paciente_destino = paciente_destino
+        self.data_reutilizacao = timezone.now()
+        self.save(update_fields=["status", "paciente_destino", "data_reutilizacao"])
+        RegistroAuditoria.objects.create(
+            clinica=self.clinica,
+            usuario=usuario,
+            acao=f"Reutilizou sobra {self.pk} de {self.apresentacao} para {paciente_destino.nome}.",
+            detalhes=f"quantidade_mg={self.quantidade_mg}; lote={self.lote or '-'}",
+        )
+
+    def descartar(self, motivo, usuario):
+        if self.status != self.Status.DISPONIVEL:
+            raise ValueError("Somente sobras disponíveis podem ser descartadas.")
+        self.status = self.Status.DESCARTADA
+        self.motivo_descarte = motivo
+        self.data_descarte = timezone.now()
+        self.save(update_fields=["status", "motivo_descarte", "data_descarte"])
+        RegistroAuditoria.objects.create(
+            clinica=self.clinica,
+            usuario=usuario,
+            acao=f"Descartou sobra {self.pk} de {self.apresentacao}.",
+            detalhes=f"motivo={motivo or '-'}; quantidade_mg={self.quantidade_mg}",
+        )
+
+
+class AliasMedicamento(models.Model):
+    """Tabela de aliases aprovados: vincula nomes usados nos relatórios de
+    transferência ao cadastro mestre da clínica (SKILL 04 — resolve_product_alias).
+    """
+
+    clinica = models.ForeignKey(
+        Clinica, on_delete=models.PROTECT, related_name="aliases_medicamento"
+    )
+    alias = models.CharField(
+        max_length=160,
+        help_text="Nome/descrição como aparece no relatório de transferência.",
+    )
+    medicamento = models.ForeignKey(
+        Medicamento, on_delete=models.PROTECT, related_name="aliases"
+    )
+    criado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["alias"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["clinica", "alias"], name="alias_medicamento_unico_por_clinica"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.alias} → {self.medicamento.nome}"
+
+
+class TransferenciaEvidencia(models.Model):
+    """Evidência fotográfica do recebimento (SKILL 06/07/16).
+
+    Preserva o arquivo original; o conteúdo extraído fica em ExtracaoEvidencia.
+    """
+
+    class StatusProcessamento(models.TextChoices):
+        NOVA = "nova", "Nova (aguardando extração)"
+        PROCESSANDO = "processando", "Processando"
+        EXTRAIDA = "extraida", "Extraída"
+        FALHOU = "falhou", "Falhou"
+        REQUER_REVISAO = "requer_revisao", "Requere revisão manual"
+
+    transferencia = models.ForeignKey(
+        Transferencia, on_delete=models.CASCADE, related_name="evidencias"
+    )
+    item = models.ForeignKey(
+        ItemTransferencia,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="evidencias",
+        help_text="Item provável ao qual a foto pertence (vínculo manual ou por semelhança).",
+    )
+    arquivo = models.FileField(
+        upload_to="transferencias/evidencias/",
+        help_text="Foto original da embalagem (nunca substituída).",
+    )
+    hash_arquivo = models.CharField(max_length=64, help_text="SHA-256 do arquivo.")
+    qualidade = models.DecimalField(
+        max_digits=4,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Score de qualidade visual (0 a 1).",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=StatusProcessamento.choices,
+        default=StatusProcessamento.NOVA,
+    )
+    suspeita_duplicidade = models.BooleanField(
+        default=False,
+        help_text="Marcado quando o hash indica possível envio repetido (nunca exclui automaticamente).",
+    )
+    enviado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["criado_em"]
+
+    def __str__(self):
+        return f"Evidência {self.pk} ({self.transferencia.numero})"
+
+
+class ExtracaoEvidencia(models.Model):
+    """Resultado estruturado e versionado da extração visual de uma evidência
+    (SKILL 10–14). Um novo processamento cria nova linha: o histórico de versões
+    permanece auditável (SKILLS 36/37).
+    """
+
+    evidencia = models.ForeignKey(
+        TransferenciaEvidencia, on_delete=models.CASCADE, related_name="extracoes"
+    )
+    nome_produto = models.CharField(max_length=200, blank=True)
+    principio_ativo = models.CharField(max_length=200, blank=True)
+    apresentacao = models.CharField(max_length=200, blank=True)
+    lote = models.CharField(max_length=80, blank=True)
+    validade = models.DateField(null=True, blank=True)
+    fabricacao = models.DateField(null=True, blank=True)
+    quantidade = models.PositiveIntegerField(null=True, blank=True)
+    codigo_gs1 = models.CharField(max_length=64, blank=True, help_text="GTIN/GS1 quando decodificado.")
+    lote_gs1 = models.CharField(max_length=80, blank=True)
+    validade_gs1 = models.DateField(null=True, blank=True)
+    confianca_produto = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
+    confianca_lote = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
+    confianca_validade = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
+    confianca_quantidade = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
+    engine = models.CharField(max_length=60, default="manual", help_text="Provider/modelo usado.")
+    versao = models.CharField(max_length=40, default="1")
+    resultado_bruto = models.JSONField(default=dict, blank=True)
+    requer_revisao = models.BooleanField(default=True)
+    extraido_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-criado_em"]
+
+
+class ReconciliacaoItemTransferencia(models.Model):
+    """Comparação esperado × observado para um item da transferência
+    (SKILLS 17–22). Mantém o que foi decidido/aprovado separado do reportado.
+    """
+
+    item = models.OneToOneField(
+        ItemTransferencia, on_delete=models.CASCADE, related_name="reconciliacao"
+    )
+    produto_observado = models.ForeignKey(
+        Apresentacao,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="reconciliacoes",
+    )
+    lote_observado = models.CharField(max_length=80, blank=True)
+    validade_observada = models.DateField(null=True, blank=True)
+    quantidade_observada = models.PositiveIntegerField(null=True, blank=True)
+    match_produto = models.BooleanField(null=True)
+    match_lote = models.BooleanField(null=True)
+    match_quantidade = models.BooleanField(null=True)
+    status_validade = models.CharField(max_length=20, blank=True, help_text="ok|critica|desconhecida|vencida")
+    status_final = models.CharField(
+        max_length=28, choices=StatusReconciliacao.choices, default=StatusReconciliacao.NAO_FOTOGRAFADO
+    )
+    confianca_final = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
+    anotacoes = models.CharField(max_length=500, blank=True)
+    revisado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    revisado_em = models.DateTimeField(null=True, blank=True)
+    criada_em = models.DateTimeField(auto_now_add=True)
+    atualizada_em = models.DateTimeField(auto_now=True)
+
+
+class DivergenciaTransferencia(models.Model):
+    """Divergência tipada e auditável (SKILL 23/24). Nunca apaga valores originais."""
+
+    class Tipo(models.TextChoices):
+        PRODUTO = "produto", "Produto diferente"
+        APRESENTACAO = "apresentacao", "Apresentação diferente"
+        LOTE = "lote", "Lote diferente"
+        QUANTIDADE = "quantidade", "Quantidade diferente"
+        VALIDADE = "validade", "Validade"
+        ITEM_EXTRA = "item_extra", "Item não previsto no relatório"
+        ITEM_AUSENTE = "item_ausente", "Item previsto ausente"
+        FOTO_INSUFICIENTE = "foto_insuficiente", "Foto insuficiente"
+        DUPLICIDADE = "duplicidade", "Possível duplicidade de evidência"
+
+    class Severidade(models.TextChoices):
+        INFORMATIVA = "informativa", "Informativa"
+        MEDIA = "media", "Média"
+        CRITICA = "critica", "Crítica"
+
+    class StatusResolucao(models.TextChoices):
+        PENDENTE = "pendente", "Pendente"
+        RESOLVIDA = "resolvida", "Resolvida"
+        IGNORADA = "ignorada", "Ignorada"
+
+    transferencia = models.ForeignKey(
+        Transferencia, on_delete=models.CASCADE, related_name="divergencias"
+    )
+    item = models.ForeignKey(
+        ItemTransferencia, on_delete=models.SET_NULL, null=True, blank=True, related_name="divergencias"
+    )
+    tipo = models.CharField(max_length=20, choices=Tipo.choices)
+    severidade = models.CharField(max_length=12, choices=Severidade.choices, default=Severidade.MEDIA)
+    valor_esperado = models.CharField(max_length=300, blank=True)
+    valor_observado = models.CharField(max_length=300, blank=True)
+    status = models.CharField(max_length=12, choices=StatusResolucao.choices, default=StatusResolucao.PENDENTE)
+    resolucao = models.CharField(max_length=500, blank=True)
+    resolvida_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    resolvida_em = models.DateTimeField(null=True, blank=True)
+    criada_em = models.DateTimeField(auto_now_add=True)
 
 

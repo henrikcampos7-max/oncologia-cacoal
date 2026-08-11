@@ -100,6 +100,15 @@ def calcular_estoque_disponivel_apresentacao(clinica, apresentacao):
     )
 
 
+def normalizar_texto(texto):
+    """Normaliza texto para deduplicação: caixa baixa, sem acentos, espaços colapsados."""
+    import unicodedata
+
+    texto = " ".join(str(texto or "").split())
+    texto = texto.casefold()
+    return "".join(c for c in unicodedata.normalize("NFD", texto) if unicodedata.category(c) != "Mn")
+
+
 def inspecionar_importacao(caminho_arquivo, max_linhas_previa=5):
     from openpyxl import load_workbook
 
@@ -181,19 +190,14 @@ def importar_medicamentos(clinica, caminho_arquivo, nome_aba, mapeamento, usuari
                 erros.append(f"Linha {numero} ({dados['nome']}): quantidade em mg deve ser maior que zero.")
                 com_erro += 1
                 continue
-            medicamento, _ = Medicamento.objects.get_or_create(
-                clinica=clinica,
-                nome=dados["nome"].strip(),
-                defaults={"principio_ativo": dados.get("principio_ativo", "").strip()},
+            medicamento, _ = _buscar_ou_criar_medicamento(
+                clinica, dados["nome"].strip(), dados.get("principio_ativo", "").strip()
             )
-            apresentacao, criada = Apresentacao.objects.get_or_create(
-                medicamento=medicamento,
-                descricao=dados["descricao"].strip(),
-                defaults={
-                    "concentracao": dados.get("concentracao", "").strip(),
-                    "quantidade_mg": quantidade_mg,
-                    "ativa": True,
-                },
+            apresentacao, criada = _buscar_ou_criar_apresentacao(
+                medicamento,
+                dados["descricao"].strip(),
+                dados.get("concentracao", "").strip(),
+                quantidade_mg,
             )
             if criada:
                 novas_apresentacoes.append(apresentacao)
@@ -203,9 +207,386 @@ def importar_medicamentos(clinica, caminho_arquivo, nome_aba, mapeamento, usuari
             com_erro += 1
     workbook.close()
 
+    _registrar_importacao(
+        clinica, caminho_arquivo, nome_aba, importadas, com_erro, erros, usuario,
+        tipo=ImportacaoArquivo.Tipo.MEDICAMENTOS,
+    )
+    return importadas, com_erro, erros, novas_apresentacoes
+
+
+def importar_gmed(clinica, caminho_arquivo, nome_aba, mapeamento, usuario=None):
+    """Importa o catálogo GMED (lista ANVISA): cria/atualiza medicamentos e
+    apresentações. Deduplica por nome normalizado (ignora acentos/caixa).
+
+    Campos esperados no mapeamento: nome, principio_ativo, descricao,
+    concentracao, quantidade_mg.
+    """
+    import os
+    from decimal import Decimal, InvalidOperation
+
+    from openpyxl import load_workbook
+
+    from .models import ImportacaoArquivo
+
+    colunas = {indice: campo for campo, indice in mapeamento.items() if campo}
+    if not colunas:
+        return 0, 0, ["Nenhuma coluna mapeada."], []
+
+    workbook = load_workbook(caminho_arquivo, read_only=True, data_only=True)
+    if nome_aba not in workbook.sheetnames:
+        workbook.close()
+        return 0, 0, [f"Aba '{nome_aba}' não encontrada no arquivo."], []
+
+    planilha = workbook[nome_aba]
+    importadas, com_erro, duplicadas = 0, 0, 0
+    erros = []
+    novas_apresentacoes = []
+    for numero, linha in enumerate(planilha.iter_rows(values_only=True), start=1):
+        if numero == 1:
+            continue
+        if not any(valor not in (None, "") for valor in linha):
+            continue
+        try:
+            dados = {}
+            for indice, campo in colunas.items():
+                dados[campo] = str(linha[indice]).strip() if indice < len(linha) and linha[indice] is not None else ""
+            if not dados.get("nome"):
+                erros.append(f"Linha {numero}: medicamento sem nome.")
+                com_erro += 1
+                continue
+            medicamento, medicamento_criado = _buscar_ou_criar_medicamento(
+                clinica, dados["nome"].strip(), dados.get("principio_ativo", "").strip()
+            )
+            if not medicamento_criado and not dados.get("descricao"):
+                duplicadas += 1
+                continue
+            if not dados.get("descricao"):
+                importadas += 1
+                continue
+            quantidade_mg = dados.get("quantidade_mg") or ""
+            if quantidade_mg:
+                try:
+                    quantidade_mg = Decimal(quantidade_mg.replace(",", "."))
+                except InvalidOperation:
+                    erros.append(
+                        f"Linha {numero} ({dados['nome']}): quantidade em mg inválida ('{quantidade_mg}')."
+                    )
+                    com_erro += 1
+                    continue
+                if quantidade_mg <= 0:
+                    erros.append(
+                        f"Linha {numero} ({dados['nome']}): quantidade em mg deve ser maior que zero."
+                    )
+                    com_erro += 1
+                    continue
+            else:
+                quantidade_mg = Decimal("1")
+            apresentacao, criada = _buscar_ou_criar_apresentacao(
+                medicamento,
+                dados["descricao"].strip(),
+                dados.get("concentracao", "").strip(),
+                quantidade_mg,
+            )
+            if criada:
+                novas_apresentacoes.append(apresentacao)
+                importadas += 1
+            else:
+                duplicadas += 1
+        except Exception as exc:
+            erros.append(f"Linha {numero}: erro inesperado ({exc}).")
+            com_erro += 1
+    workbook.close()
+
+    _registrar_importacao(
+        clinica, caminho_arquivo, nome_aba, importadas, com_erro, erros, usuario,
+        tipo=ImportacaoArquivo.Tipo.GMED,
+    )
+    return importadas, com_erro, erros, novas_apresentacoes, duplicadas
+
+
+def importar_transferencias(
+    clinica_destino,
+    clinica_origem,
+    caminho_arquivo,
+    nome_aba,
+    mapeamento,
+    usuario=None,
+):
+    """Importa transferências de Ji-Paraná → Cacoal a partir de planilha.
+
+    Campos esperados no mapeamento: numero, data, medicamento, descricao,
+    quantidade, lote, validade.
+
+    Deduplicação: uma transferência (numero) já existente com a mesma origem é
+    ignorada e contabilizada como duplicada.
+    """
+    import os
+    from datetime import date, datetime
+
+    from openpyxl import load_workbook
+
+    from .models import ImportacaoArquivo, ItemTransferencia, Transferencia
+
+    colunas = {indice: campo for campo, indice in mapeamento.items() if campo}
+    if not colunas:
+        return 0, 0, ["Nenhuma coluna mapeada."], 0
+
+    workbook = load_workbook(caminho_arquivo, read_only=True, data_only=True)
+    if nome_aba not in workbook.sheetnames:
+        workbook.close()
+        return 0, 0, [f"Aba '{nome_aba}' não encontrada no arquivo."], 0
+
+    planilha = workbook[nome_aba]
+    importadas, com_erro, duplicadas = 0, 0, 0
+    erros = []
+    transferencias = {}
+    for numero, linha in enumerate(planilha.iter_rows(values_only=True), start=1):
+        if numero == 1:
+            continue
+        if not any(valor not in (None, "") for valor in linha):
+            continue
+        try:
+            dados = {}
+            for indice, campo in colunas.items():
+                dados[campo] = str(linha[indice]).strip() if indice < len(linha) and linha[indice] is not None else ""
+            if not dados.get("numero"):
+                erros.append(f"Linha {numero}: número do documento ausente.")
+                com_erro += 1
+                continue
+            if not dados.get("medicamento"):
+                erros.append(f"Linha {numero} ({dados['numero']}): medicamento ausente.")
+                com_erro += 1
+                continue
+            try:
+                quantidade = int(float(dados.get("quantidade", "0")))
+            except ValueError:
+                quantidade = 0
+            if quantidade <= 0:
+                erros.append(
+                    f"Linha {numero} ({dados['numero']}): quantidade inválida ('{dados.get('quantidade', '')}')."
+                )
+                com_erro += 1
+                continue
+
+            apresentacao = _buscar_apresentacao_por_medicamento(
+                clinica_destino, dados["medicamento"], dados.get("descricao", "")
+            )
+            if apresentacao is None:
+                erros.append(
+                    f"Linha {numero} ({dados['numero']}): medicamento '{dados['medicamento']}' não encontrado na clínica de destino. Cadastre-o antes de importar."
+                )
+                com_erro += 1
+                continue
+
+            data_documento = None
+            if dados.get("data"):
+                try:
+                    data_documento = date.fromisoformat(dados["data"][:10])
+                except ValueError:
+                    try:
+                        data_documento = datetime.strptime(dados["data"][:10], "%d/%m/%Y").date()
+                    except ValueError:
+                        erros.append(
+                            f"Linha {numero} ({dados['numero']}): data inválida ('{dados['data']}')."
+                        )
+                        com_erro += 1
+                        continue
+
+            transferencia = transferencias.get(dados["numero"])
+            if transferencia is None:
+                transferencia = Transferencia.objects.filter(
+                    clinica_origem=clinica_origem, numero=dados["numero"]
+                ).first()
+                if transferencia is not None:
+                    duplicadas += 1
+                    erros.append(
+                        f"Linha {numero}: transferência {dados['numero']} já existente (origem {clinica_origem.nome}). Ignorada."
+                    )
+                    com_erro += 1
+                    continue
+                transferencia = Transferencia.objects.create(
+                    clinica_origem=clinica_origem,
+                    clinica_destino=clinica_destino,
+                    numero=dados["numero"],
+                    importada=True,
+                    criado_por=usuario,
+                    observacao=f"Importada de planilha (aba '{nome_aba}')",
+                )
+                transferencias[dados["numero"]] = transferencia
+
+            ItemTransferencia.objects.create(
+                transferencia=transferencia,
+                apresentacao=apresentacao,
+                quantidade=quantidade,
+            )
+            importadas += 1
+        except Exception as exc:
+            erros.append(f"Linha {numero}: erro inesperado ({exc}).")
+            com_erro += 1
+    workbook.close()
+
+    _registrar_importacao(
+        clinica_destino, caminho_arquivo, nome_aba, importadas, com_erro, erros, usuario,
+        tipo=ImportacaoArquivo.Tipo.TRANSFERENCIAS,
+    )
+    return importadas, com_erro, erros, len(transferencias)
+
+
+def _buscar_ou_criar_medicamento(clinica, nome, principio_ativo=""):
+    from .models import Medicamento
+
+    chave = normalizar_texto(nome)
+    medicamento = None
+    for candidato in Medicamento.objects.filter(clinica=clinica):
+        if normalizar_texto(candidato.nome) == chave:
+            medicamento = candidato
+            break
+    if medicamento is None:
+        medicamento = Medicamento.objects.create(
+            clinica=clinica, nome=nome, principio_ativo=principio_ativo
+        )
+        return medicamento, True
+    if principio_ativo and not medicamento.principio_ativo:
+        medicamento.principio_ativo = principio_ativo
+        medicamento.save(update_fields=["principio_ativo"])
+    return medicamento, False
+
+
+def _buscar_ou_criar_apresentacao(medicamento, descricao, concentracao, quantidade_mg):
+    from .models import Apresentacao
+
+    chave = normalizar_texto(descricao)
+    for candidato in medicamento.apresentacoes.all():
+        if normalizar_texto(candidato.descricao) == chave:
+            return candidato, False
+    return (
+        Apresentacao.objects.create(
+            medicamento=medicamento,
+            concentracao=concentracao,
+            descricao=descricao,
+            quantidade_mg=quantidade_mg,
+            ativa=True,
+        ),
+        True,
+    )
+
+
+def _buscar_apresentacao_por_medicamento(clinica, nome_medicamento, descricao=""):
+    """Localiza uma apresentação da clínica por nome do medicamento (e descrição opcional)."""
+    from .models import Medicamento
+
+    chave_med = normalizar_texto(nome_medicamento)
+    for medicamento in Medicamento.objects.filter(clinica=clinica):
+        if normalizar_texto(medicamento.nome) != chave_med:
+            continue
+        if descricao:
+            chave_ap = normalizar_texto(descricao)
+            for apresentacao in medicamento.apresentacoes.filter(ativa=True):
+                if normalizar_texto(apresentacao.descricao) == chave_ap:
+                    return apresentacao
+            return None
+        return medicamento.apresentacoes.filter(ativa=True).first()
+    return None
+
+
+def importar_transferencia_pdf(clinica_origem, clinica_destino, relatorio, usuario=None):
+    """Cria transferência a partir do PDF do relatório (Ji-Paraná).
+
+    Fluxo: hash para deduplicação → extração textual → reconhecimento de itens
+    via cadastro/aliases → criação da transferência e itens → transição de
+    estado para RELATORIO_IMPORTADO. Itens não reconhecidos não bloqueiam a
+    importação: viram pendência de conferência manual.
+    """
+    from decimal import Decimal
+
+    from django.core.files.base import ContentFile
+
+    from .conferencia import transicionar
+    from .models import ImportacaoArquivo, ItemTransferencia, Transferencia
+    from .relatorio_pdf import calcular_hash, extrair_relatorio, reconhecer_itens
+
+    conteudo = relatorio.read()
+    relatorio.seek(0)
+    if not conteudo:
+        return None, [], ["Arquivo vazio."]
+
+    hash_relatorio = calcular_hash(conteudo)
+    if Transferencia.objects.filter(hash_relatorio=hash_relatorio).exists():
+        return None, [], ["Relatório já importado anteriormente (hash duplicado)."]
+
+    try:
+        dados = extrair_relatorio(conteudo)
+    except (ValueError, RuntimeError) as exc:
+        return None, [], [f"Falha ao ler relatório: {exc}"]
+
+    # Número legado derivado da referência externa quando existente.
+    numero = Transferencia.objects.filter().count() + 1
+    exibicao = dados.get("referencia_externa") or f"TR-{numero:04d}"
+
+    transferencia = Transferencia.objects.create(
+        clinica_origem=clinica_origem,
+        clinica_destino=clinica_destino,
+        numero=exibicao,
+        importada=True,
+        relatorio_arquivo=relatorio,
+        hash_relatorio=hash_relatorio,
+        data_relatorio=dados.get("data_emissao"),
+        referencia_externa=dados.get("referencia_externa", ""),
+        criado_por=usuario,
+        observacao="Importada de relatório PDF.",
+    )
+    transferencia.relatorio_arquivo.save(
+        f"transferencia_{hash_relatorio[:12]}.pdf",
+        ContentFile(conteudo),
+        save=True,
+    )
+
+    reconhecidos, nao_reconhecidos = reconhecer_itens(clinica_destino, dados["itens"])
+    itens_criados = 0
+    for item in reconhecidos:
+        ItemTransferencia.objects.create(
+            transferencia=transferencia,
+            apresentacao=item["apresentacao"],
+            quantidade=item["quantidade"],
+        )
+        itens_criados += 1
+
+    erros = list(dados.get("informativo", []))
+    for nao in nao_reconhecidos:
+        erros.append(f"Item não reconhecido: {nao['descricao'][:60]}")
+
+    _registrar_importacao(
+        clinica_destino,
+        f"pdf://transferencia/{hash_relatorio[:12]}",
+        "relatorio_pdf",
+        itens_criados,
+        len(erros),
+        erros,
+        usuario,
+        tipo=ImportacaoArquivo.Tipo.TRANSFERENCIAS,
+    )
+    if usuario is not None:
+        transicionar(
+            transferencia,
+            Transferencia.StatusConferencia.RELATORIO_IMPORTADO,
+            usuario=usuario,
+            motivo=f"{itens_criados} itens importados do relatório.",
+        )
+    return transferencia, reconhecidos, erros
+
+
+def _registrar_importacao(
+    clinica, caminho, nome_aba, importadas, com_erro, erros, usuario,
+    tipo="",
+):
+    import os
+
+    from .models import ImportacaoArquivo
+
     ImportacaoArquivo.objects.create(
         clinica=clinica,
-        nome_arquivo=os.path.basename(caminho_arquivo),
+        tipo=tipo,
+        nome_arquivo=os.path.basename(caminho),
         aba=nome_aba,
         total_linhas=importadas + com_erro,
         importadas=importadas,
@@ -213,7 +594,6 @@ def importar_medicamentos(clinica, caminho_arquivo, nome_aba, mapeamento, usuari
         erros="\n".join(erros[:100]),
         usuario=usuario,
     )
-    return importadas, com_erro, erros, novas_apresentacoes
 
 
 def calcular_sugestao_compras(clinica, dias=30, margem_seguranca=5):
@@ -263,18 +643,22 @@ def calcular_sugestao_compras(clinica, dias=30, margem_seguranca=5):
                 "quantidade_reaproveitada_mg": (
                     projecao["quantidade_reaproveitada_mg"] if projecao else Decimal("0")
                 ),
+                "sobras_iniciais_mg": (
+                    projecao["sobras_iniciais_mg"] if projecao else Decimal("0")
+                ),
             }
         )
     sugestoes.sort(key=lambda s: (s["apresentacao"].medicamento.nome, s["apresentacao"].descricao))
     return sugestoes
 
 
-def calcular_previsao_sobras(clinica, dias=30):
+def calcular_previsao_sobras(clinica, dias=30, incluir_sobras_reais=True):
     """Motor de sobras projetadas: processa a agenda futura em ordem cronológica,
     simula abertura de frascos, reaproveita sobras dentro da estabilidade (FEFO),
     calcula perdas projetadas e a necessidade real de frascos por apresentação.
 
-    Não altera estoque físico nem exige conciliação manual.
+    Não altera estoque físico nem exige conciliação manual. Sobras reais
+    disponíveis (quando habilitado) entram no pool como sobras iniciais.
     """
     from datetime import timedelta
 
@@ -318,21 +702,65 @@ def calcular_previsao_sobras(clinica, dias=30):
 
     administracoes.sort(key=lambda adm: (adm["data_hora"], adm["sessao_id"]))
 
+    sobras_iniciais_por_apresentacao = {}
+    if incluir_sobras_reais:
+        for sobra in sobras_reais_validas(clinica):
+            sobras_iniciais_por_apresentacao.setdefault(sobra.apresentacao_id, []).append(
+                {
+                    "restante_mg": sobra.quantidade_mg,
+                    "limite": sobra.limite_estabilidade,
+                    "origem": (
+                        sobra.paciente_origem.nome if sobra.paciente_origem else "Sobra real"
+                    ),
+                }
+            )
+
     por_apresentacao = defaultdict(list)
     for adm in administracoes:
         por_apresentacao[adm["apresentacao"].pk].append(adm)
 
-    resultados = [
-        _simular_reaproveitamento(lista[0]["apresentacao"], lista)
-        for _, lista in sorted(
-            por_apresentacao.items(),
-            key=lambda item: (
-                item[1][0]["apresentacao"].medicamento.nome,
-                item[1][0]["apresentacao"].descricao,
-            ),
+    resultados = []
+    for ap_id, lista in sorted(
+        por_apresentacao.items(),
+        key=lambda item: (
+            item[1][0]["apresentacao"].medicamento.nome,
+            item[1][0]["apresentacao"].descricao,
+        ),
+    ):
+        sobras_iniciais = sobras_iniciais_por_apresentacao.get(ap_id)
+        resultados.append(
+            _simular_reaproveitamento(lista[0]["apresentacao"], lista, sobras_iniciais)
         )
-    ]
+
     return {"apresentacoes": resultados, "inconsistencias": inconsistencias}
+
+
+def sobras_reais_validas(clinica):
+    """Sobras reais disponíveis e ainda dentro da estabilidade."""
+    from django.utils import timezone
+
+    from .models import SobraReal
+
+    return list(
+        SobraReal.objects.select_related("apresentacao", "paciente_origem").filter(
+            clinica=clinica,
+            status=SobraReal.Status.DISPONIVEL,
+            limite_estabilidade__gte=timezone.now(),
+        )
+    )
+
+
+def sobras_reais_expiradas(clinica):
+    """Sobras reais disponíveis cuja estabilidade já terminou (marca para expirar)."""
+    from django.utils import timezone
+
+    from .models import SobraReal
+
+    return SobraReal.objects.filter(
+        clinica=clinica,
+        status=SobraReal.Status.DISPONIVEL,
+        limite_estabilidade__lt=timezone.now(),
+    )
 
 
 def _simular_reaproveitamento(apresentacao, administracoes, sobras_iniciais=None):
@@ -436,6 +864,10 @@ def _simular_reaproveitamento(apresentacao, administracoes, sobras_iniciais=None
         "quantidade_reaproveitada_mg": reaproveitada.quantize(Decimal("0.01")),
         "perda_projetada_mg": perda_projetada.quantize(Decimal("0.01")),
         "economia_frascos": max(0, frascos_sem - frascos_com),
+        "sobras_iniciais_mg": sum(
+            (s["restante_mg"] for s in (sobras_iniciais or [])), Decimal("0")
+        ).quantize(Decimal("0.01")),
+        "frascos_necessarios": frascos_com,
         "eventos": eventos,
     }
 
@@ -486,8 +918,11 @@ def resumir_sessoes(sessoes):
 def processar_baixa_estoque_sessao(sessao, usuario=None):
     """
     Processa a baixa no estoque por FEFO (First Expired, First Out) para cada item do protocolo da sessão realizada.
+    Quando há estabilidade cadastrada, a sobra física resultante (mg) é registrada
+    automaticamente como SobraReal no pool de reaproveitamento.
     """
-    from .models import Lote, MovimentacaoEstoque
+    from .models import Lote, MovimentacaoEstoque, SobraReal
+    from django.utils import timezone
 
     if sessao.movimentacoes_estoque.exists():
         return True, ["Baixa de estoque já havia sido realizada para esta sessão."]
@@ -523,6 +958,7 @@ def processar_baixa_estoque_sessao(sessao, usuario=None):
             ).order_by("data_validade")
 
             restante = frascos_necessarios
+            lote_utilizado = None
             for lote in lotes_disponiveis:
                 if restante <= 0:
                     break
@@ -531,6 +967,7 @@ def processar_baixa_estoque_sessao(sessao, usuario=None):
                     continue
                 lote.quantidade_atual -= deduzir
                 lote.save()
+                lote_utilizado = lote
                 restante -= deduzir
 
                 MovimentacaoEstoque.objects.create(
@@ -547,6 +984,25 @@ def processar_baixa_estoque_sessao(sessao, usuario=None):
                 mensagens.append(
                     f"Estoque insuficiente para {item.apresentacao.descricao}. Faltaram {restante} frascos."
                 )
+                continue
+
+            sobra_mg = frascos_necessarios * item.apresentacao.quantidade_mg - dose
+            if sobra_mg > 0 and item.apresentacao.estabilidade_cadastrada:
+                limite = item.apresentacao.limite_estabilidade_desde(sessao.data_hora)
+                if limite is not None and limite > timezone.now():
+                    SobraReal.objects.create(
+                        clinica=sessao.clinica,
+                        apresentacao=item.apresentacao,
+                        quantidade_mg=sobra_mg,
+                        lote=lote_utilizado,
+                        paciente_origem=sessao.paciente,
+                        data_abertura=sessao.data_hora,
+                        limite_estabilidade=limite,
+                        criada_por=usuario,
+                    )
+                    mensagens.append(
+                        f"Sobra de {('%.3f' % sobra_mg).rstrip('0').rstrip('.')} mg registrada para {item.apresentacao.descricao}."
+                    )
 
     return True, mensagens
 

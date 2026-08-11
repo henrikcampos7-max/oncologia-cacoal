@@ -18,6 +18,9 @@
               {% if item.economia_frascos > 0 %}
               <small style="display:block; color:#166534;">sem reaproveitamento: {{ item.frascos_sem_reaproveitamento }}</small>
               {% endif %}
+              {% if item.sobras_iniciais_mg > 0 %}
+              <small style="display:block; color:#0f766e;">inclui {{ item.sobras_iniciais_mg }} mg de sobras reais</small>
+              {% endif %}
             </td>
             <td>
               {% if item.economia_frascos > 0 %}

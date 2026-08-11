@@ -8,7 +8,7 @@ from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError, transaction
 from django.db.models import F, Sum
 from django.http import HttpResponse, JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.crypto import get_random_string
 from django.views.decorators.cache import never_cache
@@ -26,6 +26,7 @@ from .forms import (
     PeriodoForm,
     ProtocoloForm,
     SessaoTratamentoForm,
+    SobraRealForm,
     SolicitacaoAcessoForm,
 )
 from .models import (
@@ -43,6 +44,7 @@ from .models import (
     Protocolo,
     RegistroAuditoria,
     SessaoTratamento,
+    SobraReal,
     SolicitacaoAcesso,
     Transferencia,
 )
@@ -51,12 +53,16 @@ from .services import (
     calcular_sugestao_compras,
     coletar_alertas_estoque,
     enviar_alertas_por_email,
+    importar_gmed,
     importar_medicamentos,
+    importar_transferencias,
     inspecionar_importacao,
     processar_baixa_estoque_sessao,
     processar_saida_lotes,
     registrar_auditoria,
     resumir_sessoes,
+    sobras_reais_expiradas,
+    sobras_reais_validas,
 )
 
 
@@ -664,11 +670,28 @@ def importacoes(request):
                 caminho = temporario.name
             request.session["importacao_caminho"] = caminho
             request.session["importacao_nome"] = arquivo.name
+            request.session["importacao_tipo"] = request.POST.get("importacao_tipo", "medicamentos")
             messages.success(request, "Arquivo recebido. Defina a aba e o mapeamento das colunas.")
             return redirect("importacao_preparar")
 
     historico = clinica.importacoes.select_related("usuario")[:20]
-    contexto.update(form=form, historico=historico, pode_editar=pode_editar)
+    transferencias_importadas = (
+        clinica.transferencias_recebidas.filter(importada=True)
+        .exclude(status=Transferencia.Status.CANCELADA)
+        .select_related("clinica_origem", "criado_por")
+        .prefetch_related("itens__apresentacao__medicamento")
+    )
+    for transferencia in transferencias_importadas:
+        transferencia.total_itens = transferencia.itens.count()
+        transferencia.quantidade_total = sum(
+            item.quantidade for item in transferencia.itens.all()
+        )
+    contexto.update(
+        form=form,
+        historico=historico,
+        pode_editar=pode_editar,
+        transferencias_importadas=transferencias_importadas,
+    )
     return render(request, "core/importacoes.html", contexto)
 
 
@@ -689,38 +712,78 @@ def importacao_preparar(request):
         messages.error(request, "Nenhum arquivo em preparação. Envie novamente.")
         return redirect("importacoes")
 
+    tipo = request.session.get("importacao_tipo", "medicamentos")
+
     if request.method == "POST" and "confirmar_importacao" in request.POST:
         nome_aba = request.POST.get("aba", "")
+        if tipo == "medicamentos":
+            campos = ["nome", "principio_ativo", "descricao", "concentracao", "quantidade_mg"]
+        elif tipo == "gmed":
+            campos = ["nome", "principio_ativo", "descricao", "concentracao", "quantidade_mg"]
+        else:
+            campos = [
+                "numero", "data", "medicamento", "descricao",
+                "quantidade", "lote", "validade",
+            ]
         mapeamento = {}
-        for campo in ["nome", "principio_ativo", "descricao", "concentracao", "quantidade_mg"]:
+        for campo in campos:
             indice = request.POST.get(f"map_{campo}", "")
             if indice:
                 try:
                     mapeamento[campo] = int(indice)
                 except ValueError:
                     continue
-        if not mapeamento.get("nome") is not None and "nome" not in mapeamento:
-            messages.error(request, "Mapeie ao menos o campo 'Nome do medicamento'.")
-            return redirect("importacao_preparar")
-        campos_faltando = [campo for campo in ("nome", "descricao", "quantidade_mg") if campo not in mapeamento]
+        if tipo in ("medicamentos", "gmed"):
+            campos_obrigatorios = ["nome", "descricao", "quantidade_mg"]
+        else:
+            campos_obrigatorios = ["numero", "medicamento", "quantidade"]
+        campos_faltando = [campo for campo in campos_obrigatorios if campo not in mapeamento]
         if campos_faltando:
             messages.error(
                 request,
                 f"Mapeie os campos obrigatórios: {', '.join(campos_faltando)}.",
             )
             return redirect("importacao_preparar")
-        importadas, com_erro, erros, novas = importar_medicamentos(
-            clinica, caminho, nome_aba, mapeamento, usuario=request.user
-        )
+        try:
+            if tipo == "medicamentos":
+                importadas, com_erro, erros, novas = importar_medicamentos(
+                    clinica, caminho, nome_aba, mapeamento, usuario=request.user
+                )
+            elif tipo == "gmed":
+                importadas, com_erro, erros, novas, duplicadas = importar_gmed(
+                    clinica, caminho, nome_aba, mapeamento, usuario=request.user
+                )
+            else:
+                origem = Clinica.objects.filter(nome__icontains="Ji-Paraná").first()
+                if not origem or origem.pk == clinica.pk:
+                    messages.error(
+                        request,
+                        "Cadastre a clínica Ji-Paraná (com esse nome) para importar transferências dela.",
+                    )
+                    return redirect("importacao_preparar")
+                importadas, com_erro, erros, duplicadas = importar_transferencias(
+                    clinica_destino=clinica,
+                    clinica_origem=origem,
+                    caminho_arquivo=caminho,
+                    nome_aba=nome_aba,
+                    mapeamento=mapeamento,
+                    usuario=request.user,
+                )
+        except Exception as exc:
+            messages.error(request, f"Não foi possível concluir a importação: {exc}.")
+            return redirect("importacoes")
         registrar_auditoria(
             clinica,
             request.user,
-            "Importação de planilha",
+            f"Importação ({tipo})",
             f"{importadas} linha(s) importada(s), {com_erro} com erro ({os.path.basename(caminho)}, aba '{nome_aba}').",
             request=request,
         )
+        resultado = {"importadas": importadas, "com_erro": com_erro, "erros": erros[:50], "tipo": tipo}
+        if tipo != "medicamentos":
+            resultado["duplicadas"] = duplicadas
         messages.success(request, f"Importação concluída: {importadas} linha(s) importada(s), {com_erro} com erro.")
-        contexto.update(resultado_importacao={"importadas": importadas, "com_erro": com_erro, "erros": erros[:50]})
+        contexto.update(resultado_importacao=resultado)
         return render(request, "core/importacao_preparar.html", contexto)
 
     try:
@@ -729,7 +792,7 @@ def importacao_preparar(request):
         messages.error(request, f"Não foi possível ler o arquivo: {exc}.")
         return redirect("importacoes")
 
-    contexto.update(abas=abas, nome_arquivo=request.session.get("importacao_nome", ""))
+    contexto.update(abas=abas, nome_arquivo=request.session.get("importacao_nome", ""), tipo=tipo)
     return render(request, "core/importacao_preparar.html", contexto)
 
 
@@ -1072,6 +1135,49 @@ def detalhe_pedido(request, pk):
 
 
 @login_required
+def sobras(request):
+    """Sobras reais: registro manual de sobras físicas pós-manipulação e sua
+    reutilização/descarte, com contagem de expiradas pendentes de ação.
+    """
+    contexto = _contexto(request, "Sobras Reais")
+    clinica, perfil = contexto["clinica"], contexto["perfil"]
+    if not clinica:
+        return render(request, "core/sobras.html", contexto)
+
+    pode_editar = _pode_editar(
+        perfil, {PerfilUsuario.Papel.ADMINISTRADOR, PerfilUsuario.Papel.FARMACEUTICO}
+    )
+
+    if request.method == "POST" and pode_editar:
+        if "registrar_sobra" in request.POST:
+            form = SobraRealForm(request.POST, clinica=clinica)
+            if form.is_valid():
+                form.save(usuario=request.user, clinica=clinica)
+                messages.success(request, "Sobra registrada.")
+                return redirect("sobras")
+        else:
+            sobra_id = request.POST.get("sobra_id")
+            sobra = get_object_or_404(SobraReal, pk=sobra_id, clinica=clinica)
+            if "reutilizar_sobra" in request.POST:
+                paciente = get_object_or_404(Paciente, pk=request.POST.get("paciente_destino"))
+                sobra.reutilizar(paciente, request.user)
+                messages.success(request, "Sobra reutilizada.")
+            elif "descartar_sobra" in request.POST:
+                sobra.descartar(request.POST.get("motivo_descarte", ""), request.user)
+                messages.success(request, "Sobra descartada.")
+            return redirect("sobras")
+
+    form = SobraRealForm(clinica=clinica)
+    contexto.update(
+        form=form,
+        sobras_validas=sobras_reais_validas(clinica),
+        sobras_expiradas=sobras_reais_expiradas(clinica),
+        paciente_lista=clinica.pacientes.filter(ativo=True),
+    )
+    return render(request, "core/sobras.html", contexto)
+
+
+@login_required
 def transferencias(request):
     contexto = _contexto(request, "Transferências entre Unidades")
     clinica, perfil = contexto["clinica"], contexto["perfil"]
@@ -1247,7 +1353,11 @@ def detalhe_transferencia(request, pk):
             return redirect("detalhe_transferencia", pk=transferencia.pk)
 
         if acao == "receber" and pode_editar and transferencia.clinica_destino == clinica:
-            if transferencia.status != Transferencia.Status.EM_TRANSITO:
+            recebivel_importada = (
+                transferencia.importada
+                and transferencia.status == Transferencia.Status.RASCUNHO
+            )
+            if transferencia.status != Transferencia.Status.EM_TRANSITO and not recebivel_importada:
                 messages.error(request, "Somente transferências em trânsito podem ser recebidas.")
                 return redirect("detalhe_transferencia", pk=transferencia.pk)
             erros = []
@@ -1328,6 +1438,10 @@ def detalhe_transferencia(request, pk):
         pode_editar=pode_editar,
         e_origem=transferencia.clinica_origem == clinica,
         e_destino=transferencia.clinica_destino == clinica,
+        recebivel_importada=(
+            transferencia.importada
+            and transferencia.status == Transferencia.Status.RASCUNHO
+        ),
     )
     return render(request, "core/detalhe_transferencia.html", contexto)
 
@@ -1337,14 +1451,23 @@ def relatorios(request):
     contexto = _contexto(request, "Relatórios e Indicadores Administrativos")
     clinica = contexto["clinica"]
     if clinica:
+        agora = timezone.localtime()
+        periodo_texto = request.GET.get("mes") or agora.strftime("%Y-%m")
+        try:
+            inicio_mes = date.fromisoformat(f"{periodo_texto}-01")
+        except ValueError:
+            inicio_mes = date(agora.year, agora.month, 1)
+        ano, mes = inicio_mes.year, inicio_mes.month
+        mes_anterior = (inicio_mes - timedelta(days=1)).replace(day=1)
+        proximo_mes = (inicio_mes.replace(day=28) + timedelta(days=7)).replace(day=1)
+
         lotes = clinica.lotes.filter(ativo=True)
         total_lotes = lotes.count()
         total_frascos_estoque = sum(l.quantidade_atual for l in lotes)
         pacientes_ativos = clinica.pacientes.filter(ativo=True).count()
 
-        agora = timezone.localtime()
         sessoes_mes = clinica.sessoes.filter(
-            data_hora__year=agora.year, data_hora__month=agora.month
+            data_hora__year=ano, data_hora__month=mes
         )
         sessoes_por_status = {
             status: sessoes_mes.filter(status=status).count()
@@ -1359,8 +1482,8 @@ def relatorios(request):
             MovimentacaoEstoque.objects.filter(
                 clinica=clinica,
                 tipo=MovimentacaoEstoque.TipoMovimentacao.SAIDA,
-                data_hora__year=agora.year,
-                data_hora__month=agora.month,
+                data_hora__year=ano,
+                data_hora__month=mes,
             )
             .values("lote__apresentacao__medicamento__nome", "lote__apresentacao__descricao")
             .annotate(total_frascos=Sum("quantidade"))
@@ -1374,6 +1497,31 @@ def relatorios(request):
             }
             for item in consumo_mes
         ]
+
+        sobras_reutilizadas = clinica.sobras_reais.filter(
+            data_reutilizacao__year=ano, data_reutilizacao__month=mes
+        )
+        sobras_descartadas = clinica.sobras_reais.filter(
+            data_descarte__year=ano, data_descarte__month=mes
+        )
+        sobras_mes = list(
+            sobras_reutilizadas.select_related("apresentacao__medicamento", "paciente_destino")
+        ) + list(
+            sobras_descartadas.select_related("apresentacao__medicamento", "paciente_destino")
+        )
+        sobras_mes.sort(
+            key=lambda s: s.data_reutilizacao or s.data_descarte or s.criada_em, reverse=True
+        )
+        sobras_reutilizadas_mg = float(
+            sobras_reutilizadas.aggregate(total=Sum("quantidade_mg"))["total"] or 0
+        )
+        sobras_descartadas_mg = float(
+            sobras_descartadas.aggregate(total=Sum("quantidade_mg"))["total"] or 0
+        )
+        pedidos_mes = clinica.pedidos_compra.filter(criado_em__year=ano, criado_em__month=mes)
+        transferencias_recebidas_mes = clinica.transferencias_recebidas.filter(
+            data_recebimento__year=ano, data_recebimento__month=mes
+        ).count()
 
         por_validade = {"vencido": 0, "critico": 0, "alerta": 0, "ok": 0}
         por_estoque = {"esgotado": 0, "baixo": 0, "ok": 0}
@@ -1394,6 +1542,9 @@ def relatorios(request):
         )
 
         contexto.update(
+            inicio_mes=inicio_mes,
+            mes_anterior=mes_anterior,
+            proximo_mes=proximo_mes,
             total_lotes=total_lotes,
             total_frascos_estoque=total_frascos_estoque,
             pacientes_ativos=pacientes_ativos,
@@ -1402,12 +1553,62 @@ def relatorios(request):
             sessoes_por_status=sessoes_por_status,
             taxa_faltas=taxa(sessoes_por_status["faltou"]),
             taxa_cancelamento=taxa(sessoes_por_status["cancelada"]),
+            taxa_presenca=taxa(sessoes_por_status["realizada"]),
             consumo_mes=consumo_mes,
+            sobras_reutilizadas_mg=sobras_reutilizadas_mg,
+            sobras_reutilizadas_qtd=sobras_reutilizadas.count(),
+            sobras_descartadas_mg=sobras_descartadas_mg,
+            sobras_descartadas_qtd=sobras_descartadas.count(),
+            sobras_mes=sobras_mes[:10],
+            pedidos_criados_mes=pedidos_mes.count(),
+            pedidos_recebidos_mes=pedidos_mes.filter(
+                status=PedidoCompra.Status.RECEBIDO
+            ).count(),
+            transferencias_recebidas_mes=transferencias_recebidas_mes,
             por_validade=por_validade,
             por_estoque=por_estoque,
             lotes_urgentes=lotes_urgentes[:10],
         )
     return render(request, "core/relatorios.html", contexto)
+
+
+@login_required
+def relatorios_consumo_csv(request):
+    perfil = _perfil(request)
+    if not perfil:
+        return HttpResponse("Usuário sem clínica vinculada.", status=403)
+    agora = timezone.localtime()
+    periodo_texto = request.GET.get("mes") or agora.strftime("%Y-%m")
+    try:
+        inicio_mes = date.fromisoformat(f"{periodo_texto}-01")
+    except ValueError:
+        inicio_mes = date(agora.year, agora.month, 1)
+    consumos = (
+        MovimentacaoEstoque.objects.filter(
+            clinica=perfil.clinica,
+            tipo=MovimentacaoEstoque.TipoMovimentacao.SAIDA,
+            data_hora__year=inicio_mes.year,
+            data_hora__month=inicio_mes.month,
+        )
+        .values("lote__apresentacao__medicamento__nome", "lote__apresentacao__descricao")
+        .annotate(total_frascos=Sum("quantidade"))
+        .order_by("total_frascos")
+    )
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = 'attachment; filename="consumo-oncologia-cacoal.csv"'
+    response.write("\ufeff")
+    writer = csv.writer(response, delimiter=";")
+    writer.writerow(["Mes", "Medicamento", "Apresentacao", "Frascos"])
+    for item in consumos:
+        writer.writerow(
+            [
+                inicio_mes.strftime("%Y-%m"),
+                item["lote__apresentacao__medicamento__nome"],
+                item["lote__apresentacao__descricao"],
+                abs(item["total_frascos"]),
+            ]
+        )
+    return response
 
 
 @login_required

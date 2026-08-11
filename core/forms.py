@@ -5,11 +5,13 @@ from django.contrib.auth.forms import AuthenticationForm
 from .models import (
     Apresentacao,
     Clinica,
+    Lote,
     Medicamento,
     Paciente,
     PerfilUsuario,
     Protocolo,
     SessaoTratamento,
+    SobraReal,
 )
 
 
@@ -124,6 +126,45 @@ class SessaoTratamentoForm(forms.ModelForm):
 class PeriodoForm(forms.Form):
     data_inicial = forms.DateField(widget=DateInput())
     data_final = forms.DateField(widget=DateInput())
+
+
+class SobraRealForm(forms.ModelForm):
+    class Meta:
+        model = SobraReal
+        fields = [
+            "apresentacao",
+            "quantidade_mg",
+            "lote",
+            "paciente_origem",
+            "data_abertura",
+            "condicoes_armazenamento",
+        ]
+        widgets = {"data_abertura": DateTimeInput(format="%Y-%m-%dT%H:%M")}
+
+    def __init__(self, *args, clinica=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["apresentacao"].queryset = Apresentacao.objects.none()
+        self.fields["lote"].queryset = Lote.objects.none()
+        self.fields["paciente_origem"].queryset = Paciente.objects.none()
+        if clinica:
+            self.fields["apresentacao"].queryset = Apresentacao.objects.filter(
+                medicamento__clinica=clinica, ativa=True
+            )
+            self.fields["lote"].queryset = clinica.lotes.filter(ativo=True)
+            self.fields["paciente_origem"].queryset = clinica.pacientes.filter(ativo=True)
+
+    def save(self, commit=True, usuario=None, clinica=None):
+        sobra = super().save(commit=False)
+        sobra.limite_estabilidade = sobra.apresentacao.limite_estabilidade_desde(
+            sobra.data_abertura
+        )
+        if clinica:
+            sobra.clinica = clinica
+        if usuario:
+            sobra.criada_por = usuario
+        if commit:
+            sobra.save()
+        return sobra
 
     def clean(self):
         cleaned = super().clean()

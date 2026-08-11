@@ -135,3 +135,86 @@ class SessaoFaltasTests(TestCase):
         self.assertContains(response, "LOT-URGENTE")
         self.assertContains(response, "Validade crítica")
         self.assertEqual(lote_critico.status_validade, "critico")
+
+    def test_relatorios_filtram_por_mes(self):
+        primeiro_mes_passado = (timezone.localdate().replace(day=1) - timedelta(days=1)).replace(day=1)
+        response = self.client.get(
+            reverse("relatorios"), {"mes": primeiro_mes_passado.strftime("%Y-%m")}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total_sessoes_mes"], 0)
+        self.assertEqual(response.context["taxa_faltas"], 0)
+        self.assertNotEqual(
+            response.context["inicio_mes"].strftime("%Y-%m"),
+            timezone.localdate().strftime("%Y-%m"),
+        )
+
+    def test_relatorios_mostram_reaproveitamento_e_operacao_do_mes(self):
+        from core.models import PedidoCompra, SobraReal, Transferencia
+
+        paciente_destino = Paciente.objects.create(
+            clinica=self.clinica,
+            nome="Paciente Destino",
+            data_inicio=timezone.localdate(),
+        )
+        sobra = SobraReal.objects.create(
+            clinica=self.clinica,
+            apresentacao=self.apresentacao,
+            quantidade_mg=Decimal("40"),
+            lote=self.lote,
+            data_abertura=timezone.now(),
+            limite_estabilidade=timezone.now() + timedelta(hours=12),
+        )
+        sobra.reutilizar(paciente_destino, self.user)
+        sobra2 = SobraReal.objects.create(
+            clinica=self.clinica,
+            apresentacao=self.apresentacao,
+            quantidade_mg=Decimal("15"),
+            lote=self.lote,
+            data_abertura=timezone.now() - timedelta(hours=1),
+            limite_estabilidade=timezone.now() - timedelta(minutes=30),
+        )
+        sobra2.descartar("Contaminação suspeita", self.user)
+        PedidoCompra.objects.create(
+            clinica=self.clinica,
+            numero="PC-TESTE-0001",
+            status=PedidoCompra.Status.RECEBIDO,
+            solicitante=self.user,
+        )
+        Transferencia.objects.create(
+            clinica_origem=Clinica.objects.create(nome="Origem Relatórios"),
+            clinica_destino=self.clinica,
+            numero="TR-JP-2026-777",
+            importada=True,
+            status=Transferencia.Status.RECEBIDA,
+            data_recebimento=timezone.now(),
+        )
+
+        response = self.client.get(reverse("relatorios"))
+        self.assertEqual(response.status_code, 200)
+        contexto = response.context
+        self.assertEqual(contexto["sobras_reutilizadas_qtd"], 1)
+        self.assertEqual(contexto["sobras_reutilizadas_mg"], 40.0)
+        self.assertEqual(contexto["sobras_descartadas_qtd"], 1)
+        self.assertEqual(contexto["sobras_descartadas_mg"], 15.0)
+        self.assertEqual(contexto["pedidos_criados_mes"], 1)
+        self.assertEqual(contexto["pedidos_recebidos_mes"], 1)
+        self.assertEqual(contexto["transferencias_recebidas_mes"], 1)
+        self.assertContains(response, "Reutilizada")
+        self.assertContains(response, "Contaminação suspeita")
+
+    def test_consumo_csv_exporta_saidas_do_mes(self):
+        MovimentacaoEstoque.objects.create(
+            clinica=self.clinica,
+            lote=self.lote,
+            tipo=MovimentacaoEstoque.TipoMovimentacao.SAIDA,
+            quantidade=-2,
+            usuario=self.user,
+        )
+        response = self.client.get(reverse("relatorios_consumo_csv"))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response["Content-Type"])
+        conteudo = response.content.decode("utf-8-sig")
+        self.assertIn("Med Faltas", conteudo)
+        self.assertIn("Frasco 10 mg", conteudo)
+        self.assertIn(";2", conteudo)

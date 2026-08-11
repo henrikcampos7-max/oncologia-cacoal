@@ -1,0 +1,86 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<section class="card">
+  <h2>Registrar sobra real</h2>
+  <p>Informe o medicamento e a quantidade que sobrou fisicamente após uma manipulação ou atendimento. A sobra entra no pool usado pelo motor de previsão.</p>
+  <form method="post" class="form-grid">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button class="button primary" type="submit" name="registrar_sobra">＋ Registrar sobra</button>
+  </form>
+</section>
+
+<section class="card table-card">
+  <h2>Sobras disponíveis (dentro da estabilidade)</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Apresentação</th><th>Qtd. (mg)</th><th>Lote</th><th>Origem</th><th>Abertura</th><th>Estabilidade até</th><th>Ações</th></tr></thead>
+      <tbody>
+        {% for sobra in sobras_validas %}
+        <tr>
+          <td><strong>{{ sobra.apresentacao.medicamento.nome }}</strong> — {{ sobra.apresentacao.descricao }}</td>
+          <td>{{ sobra.quantidade_mg }}</td>
+          <td>{{ sobra.lote }}</td>
+          <td>{{ sobra.paciente_origem.nome|default:'—' }}</td>
+          <td>{{ sobra.data_abertura|date:'d/m/Y H:i' }}</td>
+          <td>{{ sobra.limite_estabilidade|date:'d/m/Y H:i' }}</td>
+          <td class="table-actions">
+            <details>
+              <summary>Reutilizar</summary>
+              <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="sobra_id" value="{{ sobra.pk }}">
+                <select name="paciente_destino" required>
+                  <option value="">Paciente…</option>
+                  {% for paciente in paciente_lista %}<option value="{{ paciente.pk }}">{{ paciente.nome }}</option>{% endfor %}
+                </select>
+                <button class="button" type="submit" name="reutilizar_sobra">Reutilizar</button>
+              </form>
+            </details>
+            <details>
+              <summary>Descartar</summary>
+              <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="sobra_id" value="{{ sobra.pk }}">
+                <input type="text" name="motivo_descarte" placeholder="Motivo">
+                <button class="button danger" type="submit" name="descartar_sobra">Descartar</button>
+              </form>
+            </details>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7" class="empty">Nenhuma sobra disponível.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card table-card">
+  <h2>Sobras expiradas (aguardando descarte)</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Apresentação</th><th>Qtd. (mg)</th><th>Lote</th><th>Estabilidade terminou</th><th>Ação</th></tr></thead>
+      <tbody>
+        {% for sobra in sobras_expiradas %}
+        <tr>
+          <td><strong>{{ sobra.apresentacao.medicamento.nome }}</strong> — {{ sobra.apresentacao.descricao }}</td>
+          <td>{{ sobra.quantidade_mg }}</td>
+          <td>{{ sobra.lote }}</td>
+          <td>{{ sobra.limite_estabilidade|date:'d/m/Y H:i' }}</td>
+          <td class="table-actions">
+            <form method="post">
+              {% csrf_token %}
+              <input type="hidden" name="sobra_id" value="{{ sobra.pk }}">
+              <button class="button danger" type="submit" name="descartar_sobra">Descartar</button>
+            </form>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="empty">Nenhuma sobra expirada.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

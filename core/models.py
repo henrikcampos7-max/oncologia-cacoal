@@ -4,6 +4,8 @@ from math import sqrt
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models import Sum
+from django.utils import timezone
 
 
 class Clinica(models.Model):
@@ -225,6 +227,17 @@ class Lote(models.Model):
             return "baixo"
         return "ok"
 
+    @property
+    def quantidade_reservada(self):
+        total = self.movimentacoes.filter(
+            tipo=MovimentacaoEstoque.TipoMovimentacao.RESERVA
+        ).aggregate(total=Sum("quantidade"))["total"]
+        return total or 0
+
+    @property
+    def quantidade_disponivel(self):
+        return max(0, self.quantidade_atual - self.quantidade_reservada)
+
 
 class MovimentacaoEstoque(models.Model):
     class TipoMovimentacao(models.TextChoices):
@@ -275,5 +288,63 @@ class RegistroAuditoria(models.Model):
 
     def __str__(self):
         return f"[{self.data_hora:%d/%m/%Y %H:%M}] {self.usuario} — {self.acao}"
+
+
+class PedidoCompra(models.Model):
+    class Status(models.TextChoices):
+        RASCUNHO = "rascunho", "Rascunho"
+        PENDENTE = "pendente", "Pendente de aprovação"
+        APROVADO = "aprovado", "Aprovado"
+        RECEBIDO = "recebido", "Recebido"
+        CANCELADO = "cancelado", "Cancelado"
+
+    clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name="pedidos_compra")
+    numero = models.CharField(max_length=30)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.RASCUNHO)
+    solicitante = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    aprovador = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    fornecedor = models.CharField(max_length=120, blank=True)
+    observacao = models.CharField(max_length=500, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    data_aprovacao = models.DateTimeField(null=True, blank=True)
+    data_recebimento = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-criado_em"]
+        constraints = [
+            models.UniqueConstraint(fields=["clinica", "numero"], name="pedido_clinica_numero_unico")
+        ]
+
+    def __str__(self):
+        return f"{self.numero} ({self.get_status_display()})"
+
+    def gerar_numero(self):
+        ano = self.criado_em.year if self.criado_em else timezone.now().year
+        sequencia = PedidoCompra.objects.filter(
+            clinica=self.clinica, numero__startswith=f"PC-{ano}-"
+        ).count() + 1
+        return f"PC-{ano}-{sequencia:04d}"
+
+
+class ItemPedidoCompra(models.Model):
+    pedido = models.ForeignKey(PedidoCompra, on_delete=models.CASCADE, related_name="itens")
+    apresentacao = models.ForeignKey(Apresentacao, on_delete=models.PROTECT)
+    quantidade = models.PositiveIntegerField()
+    quantidade_recebida = models.PositiveIntegerField(default=0)
+    custo_unitario = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True
+    )
+
+    def __str__(self):
+        return f"{self.pedido.numero} — {self.apresentacao} x {self.quantidade}"
+
+    @property
+    def restante(self):
+        return max(0, self.quantidade - self.quantidade_recebida)
 
 

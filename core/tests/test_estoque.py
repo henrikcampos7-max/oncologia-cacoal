@@ -100,3 +100,76 @@ class EstoqueModelTests(TestCase):
         lote.refresh_from_db()
         self.assertEqual(lote.quantidade_atual, 8)  # 200mg / 100mg per frasco = 2 frascos baixados
 
+    def test_reserva_nao_altera_saldo_fisico(self):
+        hoje = timezone.localdate()
+        lote = Lote.objects.create(
+            clinica=self.clinica,
+            apresentacao=self.apresentacao,
+            numero_lote="LOT-RES",
+            data_validade=hoje + timedelta(days=100),
+            quantidade_inicial=10,
+            quantidade_atual=10,
+        )
+        MovimentacaoEstoque.objects.create(
+            clinica=self.clinica,
+            lote=lote,
+            tipo=MovimentacaoEstoque.TipoMovimentacao.RESERVA,
+            quantidade=4,
+            observacao="Reserva para sessão agendada",
+        )
+        lote.refresh_from_db()
+        self.assertEqual(lote.quantidade_atual, 10)
+        self.assertEqual(lote.quantidade_reservada, 4)
+        self.assertEqual(lote.quantidade_disponivel, 6)
+
+    def test_baixa_fefo_nao_consome_estoque_reservado(self):
+        from core.models import ItemProtocolo, Paciente, Protocolo, SessaoTratamento
+        from core.services import processar_baixa_estoque_sessao
+
+        hoje = timezone.localdate()
+        protocolo = Protocolo.objects.create(clinica=self.clinica, nome="Protocolo Teste")
+        ItemProtocolo.objects.create(
+            protocolo=protocolo,
+            apresentacao=self.apresentacao,
+            ciclos="1",
+            dias_ciclo="1",
+            tipo_dose=ItemProtocolo.TipoDose.FIXA,
+            dose_valor=Decimal("200"),
+        )
+        paciente = Paciente.objects.create(
+            clinica=self.clinica,
+            nome="Paciente Teste",
+            data_inicio=hoje,
+            protocolo=protocolo,
+        )
+        lote = Lote.objects.create(
+            clinica=self.clinica,
+            apresentacao=self.apresentacao,
+            numero_lote="LOT-FEFO-RES",
+            data_validade=hoje + timedelta(days=60),
+            quantidade_inicial=10,
+            quantidade_atual=10,
+        )
+        MovimentacaoEstoque.objects.create(
+            clinica=self.clinica,
+            lote=lote,
+            tipo=MovimentacaoEstoque.TipoMovimentacao.RESERVA,
+            quantidade=9,
+            observacao="Reserva bloqueando quase todo o lote",
+        )
+        sessao = SessaoTratamento.objects.create(
+            clinica=self.clinica,
+            paciente=paciente,
+            protocolo=protocolo,
+            data_hora=timezone.now(),
+            ciclo=1,
+            dia_ciclo=1,
+            status=SessaoTratamento.Status.REALIZADA,
+        )
+
+        ok, msgs = processar_baixa_estoque_sessao(sessao)
+        lote.refresh_from_db()
+        self.assertTrue(ok)
+        self.assertEqual(lote.quantidade_atual, 9)  # 1 disponível (10 - 9 reservado) baixado
+        self.assertIn("Estoque insuficiente", msgs[0])
+

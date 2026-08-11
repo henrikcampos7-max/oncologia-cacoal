@@ -1,0 +1,8 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<section class="card"><h2>Dados do protocolo</h2><form method="post" class="form-grid">{% csrf_token %}{{ form.as_p }}<button class="button primary" type="submit" name="salvar_protocolo">Salvar Protocolo</button></form></section>
+
+<section class="card"><h2>Adicionar item (medicamento) ao protocolo</h2><form method="post" class="form-grid">{% csrf_token %}{{ form_item.as_p }}<button class="button secondary" type="submit" name="salvar_item">＋ Adicionar Item</button></form></section>
+
+<section class="card table-card"><h2>Itens do protocolo ({{ itens|length }})</h2><div class="table-wrap"><table><thead><tr><th>Medicamento / Apresentação</th><th>Ciclos</th><th>Dias do ciclo</th><th>Tipo de dose</th><th>Valor</th><th>Ações</th></tr></thead><tbody>{% for item in itens %}<tr><td><strong>{{ item.apresentacao.medicamento.nome }}</strong> — {{ item.apresentacao.descricao }}</td><td>{{ item.ciclos }}</td><td>{{ item.dias_ciclo }}</td><td>{{ item.get_tipo_dose_display }}</td><td>{{ item.dose_valor }}</td><td><form method="post" action="{% url 'remover_item_protocolo' item.pk %}" onsubmit="return confirm('Remover este item do protocolo?');">{% csrf_token %}<button class="button small danger" type="submit">Remover</button></form></td></tr>{% empty %}<tr><td colspan="6" class="empty">Nenhum item cadastrado. Adicione medicamentos ao protocolo para que sejam considerados na previsão e na baixa de estoque.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

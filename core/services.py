@@ -42,6 +42,62 @@ def numero_na_lista(texto, numero):
     return int(numero) in valores
 
 
+def registrar_auditoria(clinica, usuario, acao, detalhes="", request=None):
+    from .models import RegistroAuditoria
+
+    if not clinica:
+        return None
+    ip_origem = None
+    if request is not None:
+        ip_origem = request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip() or request.META.get("REMOTE_ADDR")
+    return RegistroAuditoria.objects.create(
+        clinica=clinica,
+        usuario=usuario,
+        acao=acao,
+        detalhes=detalhes,
+        ip_origem=ip_origem,
+    )
+
+
+def calcular_sugestao_compras(clinica, dias=30, margem_seguranca=5):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from .models import Lote
+
+    hoje = timezone.localdate()
+    sessoes_proximas = clinica.sessoes.select_related("paciente", "protocolo").prefetch_related(
+        "protocolo__itens__apresentacao__medicamento"
+    ).filter(
+        data_hora__date__range=(hoje, hoje + timedelta(days=dias)),
+        status__in=["agendada", "confirmada"],
+    )
+
+    linhas, _ = resumir_sessoes(sessoes_proximas)
+    sugestoes = []
+    for linha in linhas:
+        apresentacao = linha["apresentacao_objeto"]
+        frascos_necessarios = linha["frascos"]
+        estoque_disponivel = sum(
+            l.quantidade_disponivel for l in Lote.objects.filter(
+                clinica=clinica, apresentacao=apresentacao, ativo=True
+            )
+        )
+        falta = max(0, frascos_necessarios - estoque_disponivel)
+        sugestoes.append(
+            {
+                "apresentacao": apresentacao,
+                "necessario": frascos_necessarios,
+                "estoque": estoque_disponivel,
+                "falta": falta,
+                "sugerido_compra": falta + margem_seguranca if falta > 0 else 0,
+            }
+        )
+    sugestoes.sort(key=lambda s: (s["apresentacao"].medicamento.nome, s["apresentacao"].descricao))
+    return sugestoes
+
+
 def resumir_sessoes(sessoes):
     acumulado = defaultdict(lambda: {"administracoes": 0, "dose_total": Decimal("0")})
     inconsistencias = []
@@ -74,6 +130,7 @@ def resumir_sessoes(sessoes):
             {
                 "medicamento": apresentacao.medicamento.nome,
                 "apresentacao": apresentacao.descricao,
+                "apresentacao_objeto": apresentacao,
                 "administracoes": dados["administracoes"],
                 "dose_total": dados["dose_total"].quantize(Decimal("0.01")),
                 "quantidade_mg": apresentacao.quantidade_mg,
@@ -127,7 +184,9 @@ def processar_baixa_estoque_sessao(sessao, usuario=None):
             for lote in lotes_disponiveis:
                 if restante <= 0:
                     break
-                deduzir = min(lote.quantidade_atual, restante)
+                deduzir = min(lote.quantidade_disponivel, restante)
+                if deduzir <= 0:
+                    continue
                 lote.quantidade_atual -= deduzir
                 lote.save()
                 restante -= deduzir

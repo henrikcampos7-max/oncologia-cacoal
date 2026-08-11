@@ -145,7 +145,6 @@ class Command(BaseCommand):
                 "peso_kg": None,
                 "altura_cm": None,
                 "sexo": "",
-                "tfg": None,
                 "ativo": True,
             },
         )

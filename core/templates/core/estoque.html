@@ -12,7 +12,7 @@
     </form>
     <hr style="margin: 20px 0; border: none; border-top: 1px solid var(--border-color, #e2e8f0);">
     <h2>Registrar Movimentação</h2>
-    <p>Entrada, saída por aplicação, perda ou ajuste de inventário.</p>
+    <p>Entrada, saída por aplicação, perda, reserva ou ajuste de inventário. Ajuste aceita valor negativo; reserva não altera o saldo físico.</p>
     <form method="post" class="form-grid">
       {% csrf_token %}
       {{ form_movimentacao.as_p }}
@@ -32,6 +32,8 @@
               <th>Nº Lote</th>
               <th>Validade</th>
               <th>Qtd. Atual</th>
+              <th>Reservado</th>
+              <th>Disponível</th>
               <th>Status Validade</th>
               <th>Status Estoque</th>
             </tr>
@@ -43,6 +45,8 @@
               <td><code>{{ lote.numero_lote }}</code></td>
               <td>{{ lote.data_validade|date:"d/m/Y" }}</td>
               <td><strong>{{ lote.quantidade_atual }}</strong> frascos</td>
+              <td>{{ lote.quantidade_reservada }} frascos</td>
+              <td><strong>{{ lote.quantidade_disponivel }}</strong> frascos</td>
               <td>
                 {% if lote.status_validade == 'vencido' %}
                   <span class="badge danger" style="background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:4px; font-weight:600;">Vencido</span>
@@ -65,7 +69,7 @@
               </td>
             </tr>
             {% empty %}
-            <tr><td colspan="6" class="empty">Nenhum lote de medicamento cadastrado.</td></tr>
+            <tr><td colspan="8" class="empty">Nenhum lote de medicamento cadastrado.</td></tr>
             {% endfor %}
           </tbody>
         </table>

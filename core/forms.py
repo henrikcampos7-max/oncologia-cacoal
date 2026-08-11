@@ -162,6 +162,43 @@ class MedicamentoForm(forms.ModelForm):
         }
 
 
+class ProtocoloForm(forms.ModelForm):
+    class Meta:
+        from .models import Protocolo
+        model = Protocolo
+        fields = ["nome", "diagnostico_referencia", "intervalo_dias", "total_ciclos", "ativo"]
+        labels = {
+            "nome": "Nome do protocolo",
+            "diagnostico_referencia": "Diagnóstico de referência",
+            "intervalo_dias": "Intervalo entre ciclos (dias)",
+            "total_ciclos": "Total de ciclos",
+            "ativo": "Ativo",
+        }
+
+
+class ItemProtocoloForm(forms.ModelForm):
+    class Meta:
+        from .models import ItemProtocolo
+        model = ItemProtocolo
+        fields = ["apresentacao", "ciclos", "dias_ciclo", "tipo_dose", "dose_valor"]
+        labels = {
+            "apresentacao": "Medicamento / Apresentação",
+            "ciclos": "Ciclos (ex.: 1, 2, 3)",
+            "dias_ciclo": "Dias do ciclo (ex.: 1, 15)",
+            "tipo_dose": "Tipo de dose",
+            "dose_valor": "Valor da dose",
+        }
+
+    def __init__(self, *args, clinica=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .models import Apresentacao
+        self.fields["apresentacao"].queryset = Apresentacao.objects.none()
+        if clinica:
+            self.fields["apresentacao"].queryset = Apresentacao.objects.filter(
+                medicamento__clinica=clinica, ativa=True
+            ).select_related("medicamento")
+
+
 class ApresentacaoForm(forms.ModelForm):
     class Meta:
         model = Apresentacao

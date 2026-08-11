@@ -1,48 +1,57 @@
 {% extends 'core/base.html' %}
 {% block content %}
-<div class="card table-card">
-  <h2>Pedidos, Compras e Recebimentos</h2>
-  <p>Previsão de frascos necessários para os próximos 30 dias x estoque físico disponível.</p>
+{% if pode_criar %}
+<section class="card">
+  <h2>Criar pedido de compra</h2>
+  <p>Marque as quantidades a comprar com base na sugestão e gere um pedido em rascunho.</p>
+  <form method="post" class="form-grid">
+    {% csrf_token %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Medicamento / Apresentação</th><th>Necessidade (30 dias)</th><th>Disponível</th><th>Falta</th><th>Sugestão</th><th>Qtd. a comprar</th></tr></thead>
+        <tbody>
+          {% for item in necessidades %}
+          <tr>
+            <td><strong>{{ item.apresentacao.medicamento.nome }}</strong> — {{ item.apresentacao.descricao }}</td>
+            <td>{{ item.necessario }} frascos</td>
+            <td>{{ item.estoque }} frascos</td>
+            <td>{% if item.falta > 0 %}<span style="color:#dc2626; font-weight:bold;">-{{ item.falta }}</span>{% else %}<span style="color:#166534; font-weight:600;">Suficiente</span>{% endif %}</td>
+            <td>{% if item.sugerido_compra > 0 %}<strong style="color:#2563eb;">{{ item.sugerido_compra }}</strong>{% else %}<span style="color:#64748b;">—</span>{% endif %}</td>
+            <td><input type="number" min="0" name="qtd_{{ item.apresentacao.pk }}" value="{{ item.sugerido_compra }}" style="width:90px;"></td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6" class="empty">Nenhuma demanda calculada. Cadastre agendamentos na Agenda para simular compras.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <label>Fornecedor <input type="text" name="fornecedor" placeholder="Opcional"></label>
+    <label>Observação <input type="text" name="observacao" placeholder="Opcional"></label>
+    <button class="button primary" type="submit" name="criar_pedido">＋ Criar pedido em rascunho</button>
+  </form>
+</section>
+{% endif %}
 
+<section class="card table-card">
+  <h2>Pedidos existentes</h2>
   <div class="table-wrap">
     <table>
-      <thead>
-        <tr>
-          <th>Medicamento / Apresentação</th>
-          <th>Necessidade (30 dias)</th>
-          <th>Estoque Disponível</th>
-          <th>Falta / Déficit</th>
-          <th>Sugestão de Compra</th>
-        </tr>
-      </thead>
+      <thead><tr><th>Número</th><th>Status</th><th>Solicitante</th><th>Itens</th><th>Criado em</th><th></th></tr></thead>
       <tbody>
-        {% for item in necessidades %}
+        {% for pedido in pedidos %}
         <tr>
-          <td><strong>{{ item.apresentacao.medicamento.nome }}</strong> — {{ item.apresentacao.descricao }}</td>
-          <td>{{ item.necessario }} frascos</td>
-          <td>{{ item.estoque }} frascos</td>
-          <td>
-            {% if item.falta > 0 %}
-              <span style="color:#dc2626; font-weight:bold;">-{{ item.falta }} frascos</span>
-            {% else %}
-              <span style="color:#166534; font-weight:600;">Suficiente</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if item.sugerido_compra > 0 %}
-              <strong style="color:#2563eb;">{{ item.sugerido_compra }} frascos</strong>
-            {% else %}
-              <span style="color:#64748b;">Nenhuma compra necessária</span>
-            {% endif %}
-          </td>
+          <td><strong>{{ pedido.numero }}</strong></td>
+          <td>{{ pedido.get_status_display }}</td>
+          <td>{{ pedido.solicitante.username|default:"—" }}</td>
+          <td>{{ pedido.itens.count }}</td>
+          <td>{{ pedido.criado_em|date:"d/m/Y H:i" }}</td>
+          <td><a href="{% url 'detalhe_pedido' pedido.pk %}" class="button small">Abrir</a></td>
         </tr>
         {% empty %}
-        <tr>
-          <td colspan="5" class="empty">Nenhuma demanda calculada para os próximos 30 dias. Cadastre agendamentos na Agenda para simular compras.</td>
-        </tr>
+        <tr><td colspan="6" class="empty">Nenhum pedido de compra criado.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
-</div>
+</section>
 {% endblock %}

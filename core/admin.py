@@ -3,11 +3,13 @@ from django.contrib import admin
 from .models import (
     Apresentacao,
     Clinica,
+    ItemPedidoCompra,
     ItemProtocolo,
     Lote,
     Medicamento,
     MovimentacaoEstoque,
     Paciente,
+    PedidoCompra,
     PerfilUsuario,
     Protocolo,
     RegistroAuditoria,
@@ -88,6 +90,19 @@ class RegistroAuditoriaAdmin(admin.ModelAdmin):
     list_display = ("data_hora", "usuario", "acao", "clinica")
     list_filter = ("clinica", "acao")
     search_fields = ("usuario__username", "acao", "detalhes")
+
+
+class ItemPedidoCompraInline(admin.TabularInline):
+    model = ItemPedidoCompra
+    extra = 0
+
+
+@admin.register(PedidoCompra)
+class PedidoCompraAdmin(admin.ModelAdmin):
+    list_display = ("numero", "clinica", "status", "solicitante", "criado_em")
+    list_filter = ("clinica", "status")
+    search_fields = ("numero", "fornecedor")
+    inlines = (ItemPedidoCompraInline,)
 
 
 admin.site.site_header = "Oncologia Cacoal — Administração"

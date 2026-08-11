@@ -1,0 +1,76 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<section class="card">
+  <h2>Pedido {{ pedido.numero }}</h2>
+  <p><strong>Status:</strong> {{ pedido.get_status_display }} ·
+     <strong>Solicitante:</strong> {{ pedido.solicitante.username|default:"—" }} ·
+     {% if pedido.aprovador %}<strong>Aprovado por:</strong> {{ pedido.aprovador.username }}{% endif %}
+     {% if pedido.fornecedor %}· <strong>Fornecedor:</strong> {{ pedido.fornecedor }}{% endif %}
+  </p>
+  <p>{{ pedido.observacao|default:"" }}</p>
+
+  {% if pedido.status == 'rascunho' and pode_editar %}
+  <form method="post" style="display:inline;">{% csrf_token %}<button class="button secondary" type="submit" name="acao" value="enviar">Enviar para aprovação</button></form>
+  <form method="post" style="display:inline;">{% csrf_token %}<button class="button danger" type="submit" name="acao" value="cancelar" onclick="return confirm('Cancelar este pedido?');">Cancelar</button></form>
+  {% endif %}
+  {% if pedido.status == 'pendente' and pode_aprovar %}
+  <form method="post" style="display:inline;">{% csrf_token %}<button class="button primary" type="submit" name="acao" value="aprovar">Aprovar pedido</button></form>
+  {% endif %}
+  {% if pedido.status == 'pendente' and pode_editar %}
+  <form method="post" style="display:inline;">{% csrf_token %}<button class="button danger" type="submit" name="acao" value="cancelar" onclick="return confirm('Cancelar este pedido?');">Cancelar</button></form>
+  {% endif %}
+  {% if pedido.status == 'aprovado' and pode_editar %}
+  <form method="post" style="display:inline;">{% csrf_token %}<button class="button danger" type="submit" name="acao" value="cancelar" onclick="return confirm('Cancelar este pedido?');">Cancelar</button></form>
+  {% endif %}
+</section>
+
+<section class="card table-card">
+  <h2>Itens do pedido</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Medicamento / Apresentação</th><th>Quantidade</th><th>Recebido</th><th>Restante</th><th>Custo unitário</th></tr></thead>
+      <tbody>
+        {% for item in itens %}
+        <tr>
+          <td><strong>{{ item.apresentacao.medicamento.nome }}</strong> — {{ item.apresentacao.descricao }}</td>
+          <td>{{ item.quantidade }}</td>
+          <td>{{ item.quantidade_recebida }}</td>
+          <td>{{ item.restante }}</td>
+          <td>{{ item.custo_unitario|default:"—" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="empty">Pedido sem itens.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if pedido.status == 'aprovado' and pode_editar %}
+<section class="card">
+  <h2>Registrar recebimento</h2>
+  <p>Informe lote e validade para cada item recebido. Os lotes serão criados no estoque com entrada automática.</p>
+  <form method="post">
+    {% csrf_token %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Item</th><th>Recebido?</th><th>Nº lote</th><th>Validade (AAAA-MM-DD)</th></tr></thead>
+        <tbody>
+          {% for item in itens %}
+          {% if item.quantidade_recebida < item.quantidade %}
+          <tr>
+            <td>{{ item.apresentacao.medicamento.nome }} — {{ item.apresentacao.descricao }} (faltam {{ item.restante }})</td>
+            <td><input type="number" min="0" max="{{ item.quantidade }}" name="recebido_{{ item.pk }}" style="width:90px;"></td>
+            <td><input type="text" name="lote_{{ item.pk }}" style="width:120px;"></td>
+            <td><input type="date" name="validade_{{ item.pk }}"></td>
+          </tr>
+          {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <button class="button primary" type="submit" name="acao" value="receber">Registrar recebimento</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

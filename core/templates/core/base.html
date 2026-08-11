@@ -19,6 +19,7 @@
         <a class="{% if request.resolver_match.url_name == 'agenda' %}active{% endif %}" href="{% url 'agenda' %}">▣ <span>Agenda</span></a>
         <a class="{% if request.resolver_match.url_name == 'pacientes' %}active{% endif %}" href="{% url 'pacientes' %}">♙ <span>Pacientes e Tratamentos</span></a>
         <a class="{% if request.resolver_match.url_name == 'medicamentos' %}active{% endif %}" href="{% url 'medicamentos' %}">◇ <span>Medicamentos</span></a>
+        <a class="{% if request.resolver_match.url_name == 'protocolos' %}active{% endif %}" href="{% url 'protocolos' %}">◆ <span>Protocolos</span></a>
         <a class="{% if request.resolver_match.url_name == 'quantitativo' %}active{% endif %}" href="{% url 'quantitativo' %}">▤ <span>Quantitativo e Previsão</span></a>
         <a class="{% if request.resolver_match.url_name == 'estoque' %}active{% endif %}" href="{% url 'estoque' %}">▥ <span>Estoque e Validades</span></a>
         <a class="{% if request.resolver_match.kwargs.slug == 'transferencias' %}active{% endif %}" href="{% url 'modulo_planejado' 'transferencias' %}">⇄ <span>Transferências</span></a>

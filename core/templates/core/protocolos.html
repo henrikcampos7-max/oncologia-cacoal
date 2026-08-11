@@ -1,0 +1,7 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<div class="two-columns">
+  {% if pode_editar %}<section class="card"><h2>Novo protocolo</h2><p>Cadastre o protocolo e depois adicione os itens (medicamentos) na tela de edição.</p><form method="post" class="form-grid">{% csrf_token %}{{ form.as_p }}<button class="button primary" type="submit">＋ Salvar Protocolo</button></form></section>{% endif %}
+  <section class="card table-card"><h2>Protocolos cadastrados</h2><div class="table-wrap"><table><thead><tr><th>Nome</th><th>Diagnóstico de referência</th><th>Intervalo</th><th>Ciclos</th><th>Itens</th>{% if pode_editar %}<th>Ações</th>{% endif %}</tr></thead><tbody>{% for protocolo in protocolos %}<tr><td><strong>{{ protocolo.nome }}</strong></td><td>{{ protocolo.diagnostico_referencia|default:'—' }}</td><td>{{ protocolo.intervalo_dias }} dias</td><td>{{ protocolo.total_ciclos }}</td><td>{{ protocolo.itens.count }}</td>{% if pode_editar %}<td><a href="{% url 'editar_protocolo' protocolo.pk %}" class="button small">Editar / Itens</a></td>{% endif %}</tr>{% empty %}<tr><td colspan="{% if pode_editar %}6{% else %}5{% endif %}" class="empty">Nenhum protocolo cadastrado.</td></tr>{% endfor %}</tbody></table></div></section>
+</div>
+{% endblock %}

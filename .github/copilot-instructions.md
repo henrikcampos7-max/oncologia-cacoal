@@ -1,40 +1,52 @@
-# Instruções do repositório Oncologia Cacoal
+# Instruções permanentes do repositório
 
-## Objetivo e idioma
+Este repositório contém um sistema web de gestão farmacêutica oncológica para previsão de demanda, estoque, sobras, transferências e compras.
 
-- Responda e documente em português do Brasil.
-- Este projeto é um MVP de apoio administrativo para previsão de demanda, estoque e compras de medicamentos oncológicos.
-- O sistema não substitui avaliação médica, farmacêutica, regulatória ou operacional humana.
+## Contexto operacional
 
-## Modo economia de tokens
+- Unidade principal: Centro de Oncologia de Cacoal.
+- Ji-Paraná pode anexar relatório de transferência que será validado e integrado ao estoque de Cacoal.
+- Perfis previstos: administrador, farmacêutico, auxiliar de farmácia, enfermagem e somente leitura.
+- O sistema deve separar rigorosamente paciente, ocorrência/agendamento, medicamento, apresentação, lote, estoque, sobra e compra.
 
-- Leia somente os arquivos diretamente relacionados à tarefa.
-- Não repita instruções nem produza explicações extensas.
-- Não invoque outros agentes, pesquisa web ou integrações externas sem solicitação explícita.
-- Execute apenas testes relacionados às alterações.
-- Ao concluir, informe somente: alteração, arquivos, testes e pendências.
+## Regras de engenharia
 
-## Dados e segurança
+- Antes de editar, inspecione arquitetura, linguagem, dependências, testes, convenções e mudanças locais.
+- Preserve a tecnologia e o padrão já existentes; não substitua a arquitetura sem justificativa e aprovação.
+- Faça alterações pequenas, rastreáveis e compatíveis com o restante do projeto.
+- Nunca invente nomes de tabelas, rotas ou campos: confirme-os no código e nas migrações.
+- Centralize cálculos de domínio em serviços puros, determinísticos, tipados e testáveis; não os espalhe por telas.
+- Use transações para movimentações de estoque e proteja contra duplicidade, concorrência e saldo negativo.
+- Valores monetários e quantidades não podem usar arredondamento binário impreciso.
+- Datas devem ter fuso e semântica definidos. Diferencie data clínica, competência mensal, validade e data/hora de movimentação.
+- Toda mudança de saldo deve gerar histórico imutável com origem, motivo, usuário, data/hora e correlação.
+- Não registre dados pessoais ou clínicos em logs, mensagens de erro, fixtures públicas ou screenshots.
+- Nunca inclua segredos, tokens, senhas ou credenciais no repositório.
+- Execute lint, checagem de tipos, testes e build disponíveis antes de concluir.
+- Relate arquivos alterados, testes executados, limitações e riscos residuais.
 
-- Use exclusivamente dados fictícios em código, testes, exemplos e capturas de tela.
-- Nunca adicione dados de pacientes, prescrições, carteirinhas, documentos, planilhas operacionais, bancos reais, segredos, tokens ou arquivos `.env`.
-- Respeite `SECURITY.md` e `.gitignore`; não contorne suas exclusões.
-- Não determine doses, protocolos, equivalência de medicamentos ou substituição de apresentações.
-- Não aprove compras, movimentações de estoque, cadastros ou exclusões sem revisão humana.
-- Mantenha rastreabilidade, auditoria, controle de acesso e validação explícita nas propostas técnicas.
+## Hierarquia obrigatória dos cálculos
 
-## Desenvolvimento
+1. Paciente e ocorrência: consumo individual por data e competência.
+2. Medicamento: consolidação das ocorrências por princípio ativo/apresentação compatível.
+3. Operação: demanda bruta, sobras válidas, demanda líquida, estoque disponível e compra.
 
-- A arquitetura aprovada em 2026-08-09 é Django com páginas renderizadas no servidor e PostgreSQL. Não substitua framework, banco ou introduza serviço externo sem nova decisão documentada.
-- Prefira alterações pequenas, reversíveis e limitadas ao escopo solicitado.
-- Preserve a identidade visual existente; não redesenhe marcas com IA.
-- Não modifique repositórios de terceiros.
-- Não faça merge, implantação ou publicação automática.
-- Use branch específica, commit objetivo e pull request em rascunho.
-- Registre suposições e bloqueios; não invente requisitos ausentes.
+Nunca desconte estoque ou sobras duas vezes. Nunca arredonde frascos no nível do paciente quando a regra aprovada permitir consolidação por sessão ou período.
 
-## Qualidade
+## Previsão baseada em agenda e ciclos
 
-- Inclua critérios de aceitação e testes proporcionais ao risco.
-- Trate cálculos de estoque, validade, reservas e compras como regras críticas.
-- Mantenha validação humana antes de qualquer uso clínico ou operacional.
+- Diferencie ocorrência confirmada, prevista pelo esquema, provável, cancelada, adiada, realizada e não realizada.
+- Uma projeção de ciclo não deve virar agendamento confirmado sem ação humana ou integração autorizada.
+- Cada ocorrência prevista deve manter vínculo com paciente, plano terapêutico, ciclo, dia do ciclo, data-base, regra que originou a data e versão do plano.
+- Mudanças na data de início devem recalcular apenas eventos futuros elegíveis, preservando histórico e alterações manuais.
+- Mostre separadamente demanda confirmada, demanda projetada e demanda potencial; não some os cenários como se fossem consumo único.
+- A previsão deve ser explicável da consolidação mensal até a ocorrência individual que a originou.
+- Nunca projete dose ausente, protocolo incompleto ou quantidade de ciclos indefinida como certeza. Sinalize a lacuna.
+
+## Segurança clínica
+
+- O sistema é apoio operacional e não substitui validação do farmacêutico ou prescrição médica.
+- Regras clínicas e farmacêuticas precisam registrar fonte, versão, vigência e responsável pela aprovação.
+- Se uma regra estiver ambígua, pare e solicite decisão; não faça inferência silenciosa.
+- Alterações de dose, protocolo, estabilidade, compatibilidade ou reutilização exigem revisão humana explícita.
+- Use dados sintéticos e anonimizados em testes.

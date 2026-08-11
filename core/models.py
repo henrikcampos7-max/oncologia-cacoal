@@ -58,6 +58,10 @@ class Medicamento(models.Model):
 
 
 class Apresentacao(models.Model):
+    class UnidadeEstabilidade(models.TextChoices):
+        HORAS = "horas", "Horas"
+        DIAS = "dias", "Dias"
+
     medicamento = models.ForeignKey(
         Medicamento, on_delete=models.PROTECT, related_name="apresentacoes"
     )
@@ -69,6 +73,28 @@ class Apresentacao(models.Model):
         validators=[MinValueValidator(Decimal("0.001"))],
         help_text="Quantidade total em mg por frasco/apresentação.",
     )
+    estabilidade_apos_abertura = models.DecimalField(
+        max_digits=6,
+        decimal_places=1,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Estabilidade após abertura/reconstituição. Deixe vazio se não houver valor de referência cadastrado.",
+    )
+    unidade_estabilidade = models.CharField(
+        max_length=10,
+        choices=UnidadeEstabilidade.choices,
+        default=UnidadeEstabilidade.HORAS,
+    )
+    condicoes_armazenamento = models.CharField(
+        max_length=200, blank=True, help_text="Ex.: Refrigerar entre 2 °C e 8 °C."
+    )
+    observacoes_estabilidade = models.CharField(
+        max_length=300, blank=True, help_text="Observações de manipulação/reconstituição."
+    )
+    fonte_referencia = models.CharField(
+        max_length=200, blank=True, help_text="Fonte/bula/referência da estabilidade."
+    )
     ativa = models.BooleanField(default=True)
 
     class Meta:
@@ -76,6 +102,25 @@ class Apresentacao(models.Model):
 
     def __str__(self):
         return f"{self.medicamento} — {self.descricao}"
+
+    @property
+    def estabilidade_cadastrada(self):
+        if self.estabilidade_apos_abertura is None:
+            return False
+        return self.estabilidade_apos_abertura > 0
+
+    def limite_estabilidade_desde(self, data_hora):
+        """Data/hora limite de estabilidade a partir da abertura (None se não cadastrada)."""
+        if not self.estabilidade_cadastrada:
+            return None
+        from datetime import timedelta
+
+        valor = self.estabilidade_apos_abertura
+        if self.unidade_estabilidade == self.UnidadeEstabilidade.DIAS:
+            dias = float(valor)
+        else:
+            dias = float(valor) / 24
+        return data_hora + timedelta(days=dias)
 
 
 class Protocolo(models.Model):

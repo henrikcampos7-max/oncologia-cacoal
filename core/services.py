@@ -232,10 +232,14 @@ def calcular_sugestao_compras(clinica, dias=30, margem_seguranca=5):
     )
 
     linhas, _ = resumir_sessoes(sessoes_proximas)
+    previsao = calcular_previsao_sobras(clinica, dias=dias)
+    reaproveitamento = {p["apresentacao_id"]: p for p in previsao["apresentacoes"]}
+
     sugestoes = []
     for linha in linhas:
         apresentacao = linha["apresentacao_objeto"]
-        frascos_necessarios = linha["frascos"]
+        projecao = reaproveitamento.get(apresentacao.pk)
+        frascos_necessarios = projecao["frascos_com_reaproveitamento"] if projecao else linha["frascos"]
         estoque_disponivel = sum(
             l.quantidade_disponivel for l in Lote.objects.filter(
                 clinica=clinica, apresentacao=apresentacao, ativo=True
@@ -249,10 +253,191 @@ def calcular_sugestao_compras(clinica, dias=30, margem_seguranca=5):
                 "estoque": estoque_disponivel,
                 "falta": falta,
                 "sugerido_compra": falta + margem_seguranca if falta > 0 else 0,
+                "frascos_sem_reaproveitamento": (
+                    projecao["frascos_sem_reaproveitamento"] if projecao else linha["frascos"]
+                ),
+                "frascos_com_reaproveitamento": frascos_necessarios,
+                "economia_frascos": (
+                    projecao["economia_frascos"] if projecao else 0
+                ),
+                "quantidade_reaproveitada_mg": (
+                    projecao["quantidade_reaproveitada_mg"] if projecao else Decimal("0")
+                ),
             }
         )
     sugestoes.sort(key=lambda s: (s["apresentacao"].medicamento.nome, s["apresentacao"].descricao))
     return sugestoes
+
+
+def calcular_previsao_sobras(clinica, dias=30):
+    """Motor de sobras projetadas: processa a agenda futura em ordem cronológica,
+    simula abertura de frascos, reaproveita sobras dentro da estabilidade (FEFO),
+    calcula perdas projetadas e a necessidade real de frascos por apresentação.
+
+    Não altera estoque físico nem exige conciliação manual.
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    sessoes = clinica.sessoes.select_related("paciente", "protocolo").prefetch_related(
+        "protocolo__itens__apresentacao__medicamento"
+    ).filter(
+        data_hora__date__range=(timezone.localdate(), timezone.localdate() + timedelta(days=dias)),
+        status__in=["agendada", "confirmada"],
+    )
+
+    administracoes = []
+    inconsistencias = []
+    for sessao in sessoes:
+        for item in sessao.protocolo.itens.select_related("apresentacao__medicamento"):
+            if not numero_na_lista(item.ciclos, sessao.ciclo):
+                continue
+            if not numero_na_lista(item.dias_ciclo, sessao.dia_ciclo):
+                continue
+            dose = calcular_dose_mg(
+                item.dose_valor,
+                item.tipo_dose,
+                sessao.paciente.peso_kg,
+                sessao.paciente.altura_cm,
+            )
+            if dose is None:
+                inconsistencias.append(
+                    f"Dados insuficientes para calcular {item.apresentacao} na sessão {sessao.pk}."
+                )
+                continue
+            administracoes.append(
+                {
+                    "sessao_id": sessao.pk,
+                    "paciente": sessao.paciente,
+                    "data_hora": sessao.data_hora,
+                    "apresentacao": item.apresentacao,
+                    "dose_mg": dose,
+                }
+            )
+
+    administracoes.sort(key=lambda adm: (adm["data_hora"], adm["sessao_id"]))
+
+    por_apresentacao = defaultdict(list)
+    for adm in administracoes:
+        por_apresentacao[adm["apresentacao"].pk].append(adm)
+
+    resultados = [
+        _simular_reaproveitamento(lista[0]["apresentacao"], lista)
+        for _, lista in sorted(
+            por_apresentacao.items(),
+            key=lambda item: (
+                item[1][0]["apresentacao"].medicamento.nome,
+                item[1][0]["apresentacao"].descricao,
+            ),
+        )
+    ]
+    return {"apresentacoes": resultados, "inconsistencias": inconsistencias}
+
+
+def _simular_reaproveitamento(apresentacao, administracoes, sobras_iniciais=None):
+    """Simula aberturas e reaproveitamentos para uma única apresentação.
+
+    `sobras_iniciais` (opcional) permite iniciar o pool com sobras projetadas
+    pré-existentes — ponto de integração futuro para sobras reais no motor.
+
+    Retorna indicadores e a linha do tempo (eventos) da projeção.
+    """
+    quantidade_mg = apresentacao.quantidade_mg
+    tem_estabilidade = apresentacao.estabilidade_cadastrada
+    sobras = [dict(s) for s in (sobras_iniciais or [])]  # {"restante_mg", "limite", "origem"}
+    eventos = []
+    pacientes = set()
+    administracoes_total = 0
+    demanda_total = Decimal("0")
+    frascos_sem = 0
+    frascos_com = 0
+    reaproveitada = Decimal("0")
+    perda_projetada = Decimal("0")
+
+    for adm in administracoes:
+        data_hora, dose = adm["data_hora"], adm["dose_mg"]
+        nome_paciente = adm["paciente"].nome
+        pacientes.add(nome_paciente)
+        administracoes_total += 1
+        demanda_total += dose
+        frascos_sem += calcular_frascos(dose, quantidade_mg)
+
+        if tem_estabilidade:
+            expiradas = [s for s in sobras if data_hora > s["limite"]]
+            for s in expiradas:
+                perda_projetada += s["restante_mg"]
+                eventos.append(
+                    {
+                        "tipo": "perda_projetada",
+                        "paciente": s["origem"],
+                        "data_hora": s["limite"],
+                        "mg": s["restante_mg"],
+                        "detalhe": "estabilidade vencida",
+                    }
+                )
+            sobras = [s for s in sobras if data_hora <= s["limite"]]
+
+            sobras.sort(key=lambda s: s["limite"])
+            restante = dose
+            for s in sobras:
+                if restante <= 0:
+                    break
+                usar = min(s["restante_mg"], restante)
+                s["restante_mg"] -= usar
+                restante -= usar
+                reaproveitada += usar
+                eventos.append(
+                    {
+                        "tipo": "reuso",
+                        "paciente": nome_paciente,
+                        "data_hora": data_hora,
+                        "mg": usar,
+                        "detalhe": f"sobra de {s['origem']}",
+                    }
+                )
+            sobras = [s for s in sobras if s["restante_mg"] > 0]
+            dose_restante = restante
+        else:
+            dose_restante = dose
+
+        if dose_restante > 0:
+            frascos = calcular_frascos(dose_restante, quantidade_mg)
+            frascos_com += frascos
+            eventos.append(
+                {
+                    "tipo": "abertura",
+                    "paciente": nome_paciente,
+                    "data_hora": data_hora,
+                    "mg": dose_restante,
+                    "detalhe": f"{frascos} frasco(s) de {quantidade_mg} mg",
+                }
+            )
+            sobra_mg = frascos * quantidade_mg - dose_restante
+            if tem_estabilidade and sobra_mg > 0:
+                limite = apresentacao.limite_estabilidade_desde(data_hora)
+                sobras.append(
+                    {"restante_mg": sobra_mg, "limite": limite, "origem": nome_paciente}
+                )
+
+    return {
+        "apresentacao_id": apresentacao.pk,
+        "apresentacao_objeto": apresentacao,
+        "medicamento": apresentacao.medicamento.nome,
+        "apresentacao": apresentacao.descricao,
+        "estabilidade_cadastrada": tem_estabilidade,
+        "flag": None if tem_estabilidade else "ESTABILIDADE_NAO_CADASTRADA",
+        "pacientes": sorted(pacientes),
+        "quantidade_pacientes": len(pacientes),
+        "administracoes": administracoes_total,
+        "demanda_total_mg": demanda_total.quantize(Decimal("0.01")),
+        "frascos_sem_reaproveitamento": frascos_sem,
+        "frascos_com_reaproveitamento": frascos_com,
+        "quantidade_reaproveitada_mg": reaproveitada.quantize(Decimal("0.01")),
+        "perda_projetada_mg": perda_projetada.quantize(Decimal("0.01")),
+        "economia_frascos": max(0, frascos_sem - frascos_com),
+        "eventos": eventos,
+    }
 
 
 def resumir_sessoes(sessoes):

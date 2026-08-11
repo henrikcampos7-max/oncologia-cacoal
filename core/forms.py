@@ -65,6 +65,27 @@ class MedicamentoApresentacaoForm(forms.Form):
     quantidade_mg = forms.DecimalField(
         min_value=0.001, max_digits=12, decimal_places=3, label="mg por frasco"
     )
+    estabilidade_apos_abertura = forms.DecimalField(
+        max_digits=6,
+        decimal_places=1,
+        required=False,
+        label="Estabilidade após abertura",
+        help_text="Horas ou dias (vazio = não cadastrada; 0 = não reaproveitável).",
+    )
+    unidade_estabilidade = forms.ChoiceField(
+        choices=Apresentacao.UnidadeEstabilidade.choices,
+        initial=Apresentacao.UnidadeEstabilidade.HORAS,
+        label="Unidade da estabilidade",
+    )
+    condicoes_armazenamento = forms.CharField(
+        max_length=200, required=False, label="Condições de armazenamento"
+    )
+    observacoes_estabilidade = forms.CharField(
+        max_length=300, required=False, label="Observações de estabilidade"
+    )
+    fonte_referencia = forms.CharField(
+        max_length=200, required=False, label="Fonte/referência"
+    )
 
     def save(self, clinica):
         medicamento, _ = Medicamento.objects.get_or_create(
@@ -77,6 +98,11 @@ class MedicamentoApresentacaoForm(forms.Form):
             concentracao=self.cleaned_data["concentracao"],
             descricao=self.cleaned_data["apresentacao"],
             quantidade_mg=self.cleaned_data["quantidade_mg"],
+            estabilidade_apos_abertura=self.cleaned_data.get("estabilidade_apos_abertura"),
+            unidade_estabilidade=self.cleaned_data.get("unidade_estabilidade", Apresentacao.UnidadeEstabilidade.HORAS),
+            condicoes_armazenamento=self.cleaned_data.get("condicoes_armazenamento", ""),
+            observacoes_estabilidade=self.cleaned_data.get("observacoes_estabilidade", ""),
+            fonte_referencia=self.cleaned_data.get("fonte_referencia", ""),
         )
 
 
@@ -245,11 +271,26 @@ class ImportacaoArquivoForm(forms.Form):
 class ApresentacaoForm(forms.ModelForm):
     class Meta:
         model = Apresentacao
-        fields = ["concentracao", "descricao", "quantidade_mg", "ativa"]
+        fields = [
+            "concentracao",
+            "descricao",
+            "quantidade_mg",
+            "estabilidade_apos_abertura",
+            "unidade_estabilidade",
+            "condicoes_armazenamento",
+            "observacoes_estabilidade",
+            "fonte_referencia",
+            "ativa",
+        ]
         labels = {
             "concentracao": "Concentração",
             "descricao": "Descrição",
             "quantidade_mg": "Quantidade (mg)",
+            "estabilidade_apos_abertura": "Estabilidade após abertura",
+            "unidade_estabilidade": "Unidade da estabilidade",
+            "condicoes_armazenamento": "Condições de armazenamento",
+            "observacoes_estabilidade": "Observações de estabilidade",
+            "fonte_referencia": "Fonte/referência",
             "ativa": "Ativa",
         }
 

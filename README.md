@@ -13,9 +13,32 @@ Projeto em fase de planejamento de um MVP administrativo para previsão de deman
 
 ## Estado atual
 
-A arquitetura **Django 5.2 LTS + PostgreSQL** foi aprovada em 2026-08-09. O repositório contém a base da aplicação, documentação funcional, identidade visual, modelos iniciais e uma primeira interface server-rendered para acesso, painel, agenda, pacientes, medicamentos e quantitativo. A aplicação ainda não foi implantada nem autorizada para dados reais.
+A arquitetura **Django 5.2 LTS + PostgreSQL** foi aprovada em 2026-08-09. O repositório contém a base da aplicação, documentação funcional, identidade visual e uma interface server-rendered com:
+
+- autenticação por email + administração de perfis/clínicas;
+- painel e agenda de sessões de tratamento;
+- pacientes, medicamentos, apresentações, protocolos e itens;
+- estoque com movimentações, lotes, validades, reservas e alertas;
+- compras com pedido e aprovação; sugestão automática de compras;
+- transferências entre unidades (rascunho, em trânsito, recebida);
+- solicitação/recuperação de acesso com aprovação administrativa;
+- importação de planilhas XLSX com mapeamento de colunas e histórico;
+- auditoria transacional e testes automatizados (48 testes).
+
+A aplicação ainda não foi implantada nem autorizada para dados reais.
+
+## Desenvolvimento
 
 Consulte [docs/DESENVOLVIMENTO.md](docs/DESENVOLVIMENTO.md) para preparar o ambiente local com dados fictícios.
+
+### Rodar os testes
+
+```powershell
+$env:DJANGO_DEBUG = "true"
+& ".venv\Scripts\python.exe" manage.py test core
+```
+
+A cada push para `main`, o [GitHub Actions](.github/workflows/ci.yml) roda `manage.py check` e a suíte de testes (Python 3.13, SQLite).
 
 ## Segurança
 
@@ -29,7 +52,7 @@ Consulte [SECURITY.md](SECURITY.md) antes de adicionar dados ou integrações.
 ## Próximos passos
 
 1. Instalar e configurar PostgreSQL para desenvolvimento local e aplicar as migrações.
-2. Completar recuperação de acesso, protocolos e itens repetíveis por tratamento.
-3. Implementar estoque, lotes, validades, compras, importações e auditoria transacional.
+2. Incrementar agenda com marcação de faltas e cancelamentos de sessões.
+3. Relatórios gerenciais e notificações/alertas por email.
 4. Adicionar somente dados fictícios e ampliar testes das regras críticas.
 5. Validar segurança, LGPD e fluxos com responsáveis humanos antes de qualquer uso operacional.

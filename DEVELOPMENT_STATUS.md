@@ -3,7 +3,7 @@
 > Manter este arquivo curto. Ele é a memória operacional do projeto.
 
 ## Status geral
-Projeto em desenvolvimento. Fases 0–8 concluídas; Fases 9–10 pendentes.
+Projeto em desenvolvimento. Fases 0–10 concluídas no núcleo (incluindo o módulo de conferência automatizada de transferências).
 
 ## Concluído
 - **Fase 0 — Estabilização**: stack confirmada (Django + SQLite/Postgres), testes, README e docs.
@@ -20,23 +20,29 @@ Projeto em desenvolvimento. Fases 0–8 concluídas; Fases 9–10 pendentes.
   - Transferências importadas criam `Transferencia.importada=True` (rascunho) sem baixa de estoque; dedup por documento na mesma origem.
   - Conciliação: página de importações lista transferências importadas pendentes com link para conferência/recebimento.
   - Fluxo: upload .xlsx → escolha da aba → mapeamento de colunas por tipo → prévia → confirmação com contadores (importadas/erros/duplicadas).
+- **Fase 9 — Operação**: relatórios com navegação por mês, exportação CSV do consumo mensal (`relatorios_consumo_csv`) e métricas administrativas (sobras, compras, transferências, taxa de presença).
+- **Fase 10 — Conferência automatizada de transferências (Ji-Paraná → Cacoal)**:
+  - Máquina de estados `Transferencia.status_conferencia` (`core/conferencia.py`) com transições validadas e sincronização do status legado.
+  - Importação do relatório PDF (`core/relatorio_pdf.py` + `importar_transferencia_pdf`): extração por regex (descrição/lote/validade/quantidade), hash SHA-256 para deduplicação, referência externa e data de emissão; itens não reconhecidos viram pendências sem bloquear.
+  - Resolução de nomes por cadastro local e aliases aprovados (`AliasMedicamento`).
+  - Evidências fotográficas (`core/vision.py`): validação de tipo/tamanho, hash com suspeita de duplicidade, providers de extração plugáveis (Manual/Mock determinístico via `TRANSFER_VISION_PROVIDER`), versões de extração auditáveis (`ExtracaoEvidencia`).
+  - Reconciliação (`core/reconciliacao.py`): comparativo esperado × observado, classificação de validade (ok/crítica/vencida/desconhecida), divergências tipadas com severidade e resolução auditada, derivação automática do estado (EM_CONFERENCIA/DIVERGENCIA/PRONTA_PARA_APROVACAO).
+  - Aprovação e integração ao estoque: somente conferências aprovadas criam lotes e movimentações de entrada no destino.
+  - Telas: importação do relatório, conferência (evidências → reconciliação → aprovação → estoque), links nas telas de transferências e admin para os novos registros.
 
 ## Parcial
 - Nenhum item pendente nas fases concluídas.
 
 ## Em andamento
-- **Fase 9 — Operação** (parcial):
-  - Relatórios com navegação por mês e exportação CSV do consumo mensal (relatorios_consumo_csv).
-  - Novas métricas: sobras reutilizadas/descartadas (mg), pedidos de compra criados/recebidos, transferências recebidas e taxa de presença.
-  - Conciliação de transferências importadas: recebimento direto de documentos importados em rascunho (sem baixa na origem), formando lotes no destino.
-  - Pendente: lista de compras consolidada e integrações avançadas (Fase 10).
+- Nenhum. Validação contínua da conferência automatizada em ambiente real (OCR externo via `TRANSFER_VISION_PROVIDER` quando disponível).
 
 ## Próxima Issue
-- [ ] Fase 9: revisar lista consolidada de compras/projeções e examinar indicadores adicionais.
+- [ ] Validar o parser do relatório "rev. 77" com PDFs reais de Ji-Paraná e ajustar padrões de linha se necessário.
+- [ ] Plugar provider de OCR real (ex.: Azure/Google) implementando `ProviderBase`.
 
 ## Backlog prioritário
-- [ ] Fase 9: relatórios e indicadores administrativos ampliados
-- [ ] Fase 10: alertas avançados e integrações opcionais
+- [ ] OCR real no pipeline de evidências (provider externo).
+- [ ] Alertas avançados e integrações opcionais.
 
 ## Não priorizar agora
 WhatsApp, dashboards sofisticados, notificações avançadas e integrações não essenciais.
@@ -46,6 +52,8 @@ WhatsApp, dashboards sofisticados, notificações avançadas e integrações nã
 - `SobraReal` nunca altera estoque físico; entra no pool do motor apenas como sobra inicial.
 - Importações são sempre em duas etapas (enviar → mapear/confirmar); a importação efetiva nunca roda direto do upload.
 - Transferências importadas não baixam estoque automaticamente: exigem conferência (recebimento) com lote/validade.
+- Conferência automatizada nunca inventa lote/validade: campos ausentes ficam vazios e exigem revisão humana antes da aprovação.
+- Integração ao estoque só ocorre em transferências aprovadas; todo o histórico (evidências, extrações, divergências, resoluções) permanece auditável.
 
 ## Bloqueios
 Nenhum registrado.

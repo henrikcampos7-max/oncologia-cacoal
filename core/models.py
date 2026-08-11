@@ -154,6 +154,7 @@ class SessaoTratamento(models.Model):
         CONFIRMADA = "confirmada", "Confirmada"
         REALIZADA = "realizada", "Realizada"
         CANCELADA = "cancelada", "Cancelada"
+        FALTOU = "faltou", "Faltou / Não compareceu"
 
     clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name="sessoes")
     paciente = models.ForeignKey(Paciente, on_delete=models.PROTECT, related_name="sessoes")
@@ -162,6 +163,11 @@ class SessaoTratamento(models.Model):
     ciclo = models.PositiveSmallIntegerField(default=1)
     dia_ciclo = models.PositiveSmallIntegerField(default=1)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.AGENDADA)
+    motivo = models.CharField(
+        max_length=300,
+        blank=True,
+        help_text="Motivo de falta ou cancelamento, quando aplicável.",
+    )
     observacoes = models.CharField(max_length=500, blank=True)
     criado_em = models.DateTimeField(auto_now_add=True)
 

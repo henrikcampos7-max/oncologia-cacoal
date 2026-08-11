@@ -33,7 +33,10 @@
           <td><strong>{{ sessao.paciente.nome }}</strong></td>
           <td>{{ sessao.protocolo.nome }}</td>
           <td>Ciclo {{ sessao.ciclo }} (Dia {{ sessao.dia_ciclo }})</td>
-          <td><span class="status {{ sessao.status }}">{{ sessao.get_status_display }}</span></td>
+          <td>
+            <span class="status {{ sessao.status }}">{{ sessao.get_status_display }}</span>
+            {% if sessao.motivo %}<small style="display: block; color: #64748b;">{{ sessao.motivo }}</small>{% endif %}
+          </td>
           {% if pode_editar %}
           <td>
             <div style="display: flex; gap: 5px;">
@@ -50,9 +53,16 @@
                   <input type="hidden" name="status" value="realizada">
                   <button class="button primary small" type="submit" style="padding: 2px 8px; font-size: 12px; background: #166534; border-color: #166534;">Realizar e Baixar Estoque</button>
                 </form>
-                <form method="post" action="{% url 'atualizar_status_sessao' sessao.pk %}">
+                <form method="post" action="{% url 'atualizar_status_sessao' sessao.pk %}" style="display: flex; gap: 4px; align-items: center;">
+                  {% csrf_token %}
+                  <input type="hidden" name="status" value="faltou">
+                  <input type="text" name="motivo" maxlength="300" placeholder="Motivo da falta" style="padding: 2px 6px; font-size: 12px; width: 140px;">
+                  <button class="button danger small" type="submit" title="Marcar falta" style="padding: 2px 8px; font-size: 12px; background: #b45309; color: white; border: none; border-radius: 4px;">Faltou</button>
+                </form>
+                <form method="post" action="{% url 'atualizar_status_sessao' sessao.pk %}" style="display: flex; gap: 4px; align-items: center;">
                   {% csrf_token %}
                   <input type="hidden" name="status" value="cancelada">
+                  <input type="text" name="motivo" maxlength="300" placeholder="Motivo do cancelamento" style="padding: 2px 6px; font-size: 12px; width: 140px;">
                   <button class="button danger small" type="submit" style="padding: 2px 8px; font-size: 12px; background: #991b1b; color: white; border: none; border-radius: 4px;">Cancelar</button>
                 </form>
               {% endif %}

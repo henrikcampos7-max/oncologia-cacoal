@@ -6,7 +6,7 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError, transaction
-from django.db.models import F
+from django.db.models import F, Sum
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
@@ -297,6 +297,9 @@ def atualizar_status_sessao(request, pk):
             if novo_status == SessaoTratamento.Status.REALIZADA:
                 _, mensagens = processar_baixa_estoque_sessao(sessao, usuario=request.user)
             sessao.status = novo_status
+            motivo = request.POST.get("motivo", "").strip()
+            if novo_status in (SessaoTratamento.Status.CANCELADA, SessaoTratamento.Status.FALTOU):
+                sessao.motivo = motivo[:300]
             sessao.save()
         messages.success(request, f"Status da sessão atualizado para '{sessao.get_status_display()}'.")
         registrar_auditoria(
@@ -1321,15 +1324,71 @@ def relatorios(request):
         total_lotes = lotes.count()
         total_frascos_estoque = sum(l.quantidade_atual for l in lotes)
         pacientes_ativos = clinica.pacientes.filter(ativo=True).count()
-        sessoes_realizadas_mes = clinica.sessoes.filter(
-            data_hora__month=timezone.localdate().month,
-            status="realizada",
-        ).count()
+
+        agora = timezone.localtime()
+        sessoes_mes = clinica.sessoes.filter(
+            data_hora__year=agora.year, data_hora__month=agora.month
+        )
+        sessoes_por_status = {
+            status: sessoes_mes.filter(status=status).count()
+            for status, _ in SessaoTratamento.Status.choices
+        }
+        total_sessoes_mes = sessoes_mes.count()
+
+        def taxa(contador):
+            return round(contador * 100 / total_sessoes_mes, 1) if total_sessoes_mes else 0
+
+        consumo_mes = (
+            MovimentacaoEstoque.objects.filter(
+                clinica=clinica,
+                tipo=MovimentacaoEstoque.TipoMovimentacao.SAIDA,
+                data_hora__year=agora.year,
+                data_hora__month=agora.month,
+            )
+            .values("lote__apresentacao__medicamento__nome", "lote__apresentacao__descricao")
+            .annotate(total_frascos=Sum("quantidade"))
+            .order_by("total_frascos")[:10]
+        )
+        consumo_mes = [
+            {
+                "medicamento": item["lote__apresentacao__medicamento__nome"],
+                "apresentacao": item["lote__apresentacao__descricao"],
+                "frascos": abs(item["total_frascos"]),
+            }
+            for item in consumo_mes
+        ]
+
+        por_validade = {"vencido": 0, "critico": 0, "alerta": 0, "ok": 0}
+        por_estoque = {"esgotado": 0, "baixo": 0, "ok": 0}
+        lotes_urgentes = []
+        for lote in lotes:
+            validade, estoque = lote.status_validade, lote.status_estoque
+            por_validade[validade] += 1
+            por_estoque[estoque] += 1
+            if validade in ("vencido", "critico") or estoque in ("esgotado", "baixo"):
+                lotes_urgentes.append((lote, validade, estoque))
+        lotes_urgentes.sort(
+            key=lambda item: (
+                item[1] != "vencido",
+                item[1] != "critico",
+                item[2] != "esgotado",
+                item[0].dias_para_vencer,
+            )
+        )
+
         contexto.update(
             total_lotes=total_lotes,
             total_frascos_estoque=total_frascos_estoque,
             pacientes_ativos=pacientes_ativos,
-            sessoes_realizadas_mes=sessoes_realizadas_mes,
+            sessoes_realizadas_mes=sessoes_por_status["realizada"],
+            total_sessoes_mes=total_sessoes_mes,
+            sessoes_por_status=sessoes_por_status,
+            taxa_faltas=taxa(sessoes_por_status["faltou"]),
+            taxa_cancelamento=taxa(sessoes_por_status["cancelada"]),
+            consumo_mes=consumo_mes,
+            por_validade=por_validade,
+            por_estoque=por_estoque,
+            lotes_urgentes=lotes_urgentes[:10],
         )
     return render(request, "core/relatorios.html", contexto)
 

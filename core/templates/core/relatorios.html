@@ -1,27 +1,123 @@
 {% extends 'core/base.html' %}
 {% block content %}
 <div style="display: flex; flex-direction: column; gap: 20px;">
-  <div class="card">
+  <section class="card">
     <h2>Indicadores Gerais da Clínica</h2>
-    <p>Resumo operacional e administrativo de Oncologia.</p>
+    <p>Resumo operacional e administrativo do mês atual.</p>
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 20px;">
       <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:20px; border-radius:8px; text-align:center;">
         <div style="font-size:32px; font-weight:bold; color:#0f172a;">{{ pacientes_ativos|default:0 }}</div>
         <div style="color:#64748b; font-size:14px; margin-top:4px;">Pacientes Ativos</div>
       </div>
       <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:20px; border-radius:8px; text-align:center;">
-        <div style="font-size:32px; font-weight:bold; color:#0284c7;">{{ total_lotes|default:0 }}</div>
-        <div style="color:#64748b; font-size:14px; margin-top:4px;">Lotes Cadastrados</div>
+        <div style="font-size:32px; font-weight:bold; color:#0284c7;">{{ total_sessoes_mes|default:0 }}</div>
+        <div style="color:#64748b; font-size:14px; margin-top:4px;">Sessões no Mês</div>
       </div>
       <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:20px; border-radius:8px; text-align:center;">
-        <div style="font-size:32px; font-weight:bold; color:#16a34a;">{{ total_frascos_estoque|default:0 }}</div>
-        <div style="color:#64748b; font-size:14px; margin-top:4px;">Total de Frascos em Estoque</div>
+        <div style="font-size:32px; font-weight:bold; color:#16a34a;">{{ sessoes_realizadas_mes|default:0 }}</div>
+        <div style="color:#64748b; font-size:14px; margin-top:4px;">Aplicações Realizadas</div>
       </div>
       <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:20px; border-radius:8px; text-align:center;">
-        <div style="font-size:32px; font-weight:bold; color:#9333ea;">{{ sessoes_realizadas_mes|default:0 }}</div>
-        <div style="color:#64748b; font-size:14px; margin-top:4px;">Aplicações Realizadas (Mês Atual)</div>
+        <div style="font-size:32px; font-weight:bold; color:#b45309;">{{ taxa_faltas|default:0 }}%</div>
+        <div style="color:#64748b; font-size:14px; margin-top:4px;">Taxa de Faltas</div>
+      </div>
+      <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:20px; border-radius:8px; text-align:center;">
+        <div style="font-size:32px; font-weight:bold; color:#9333ea;">{{ taxa_cancelamento|default:0 }}%</div>
+        <div style="color:#64748b; font-size:14px; margin-top:4px;">Taxa de Cancelamento</div>
+      </div>
+      <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:20px; border-radius:8px; text-align:center;">
+        <div style="font-size:32px; font-weight:bold; color:#0f766e;">{{ total_frascos_estoque|default:0 }}</div>
+        <div style="color:#64748b; font-size:14px; margin-top:4px;">Frascos em Estoque ({{ total_lotes|default:0 }} lotes)</div>
       </div>
     </div>
+  </section>
+
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 20px;">
+    <section class="card">
+      <h2>Sessões por status (mês)</h2>
+      <table>
+        <thead><tr><th>Status</th><th>Quantidade</th></tr></thead>
+        <tbody>
+          {% for status, quantidade in sessoes_por_status.items %}
+          <tr>
+            <td>
+              {% if status == 'agendada' %}Agendada{% elif status == 'confirmada' %}Confirmada{% elif status == 'realizada' %}Realizada{% elif status == 'cancelada' %}Cancelada{% else %}Faltou{% endif %}
+            </td>
+            <td>{{ quantidade }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Medicamentos mais consumidos (mês)</h2>
+      <table>
+        <thead><tr><th>Medicamento</th><th>Apresentação</th><th>Frascos</th></tr></thead>
+        <tbody>
+          {% for item in consumo_mes %}
+          <tr>
+            <td><strong>{{ item.medicamento }}</strong></td>
+            <td>{{ item.apresentacao }}</td>
+            <td>{{ item.frascos }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="3" class="empty">Sem saídas registradas no mês.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
   </div>
+
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 20px;">
+    <section class="card">
+      <h2>Estoque por validade</h2>
+      <table>
+        <thead><tr><th>Situação</th><th>Lotes</th></tr></thead>
+        <tbody>
+          <tr><td>Vencidos</td><td>{{ por_validade.vencido }}</td></tr>
+          <tr><td>Vencendo em até 30 dias</td><td>{{ por_validade.critico }}</td></tr>
+          <tr><td>Vencendo em até 90 dias</td><td>{{ por_validade.alerta }}</td></tr>
+          <tr><td>Dentro do prazo</td><td>{{ por_validade.ok }}</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Estoque por quantidade</h2>
+      <table>
+        <thead><tr><th>Situação</th><th>Lotes</th></tr></thead>
+        <tbody>
+          <tr><td>Esgotados</td><td>{{ por_estoque.esgotado }}</td></tr>
+          <tr><td>No limite mínimo</td><td>{{ por_estoque.baixo }}</td></tr>
+          <tr><td>Normal</td><td>{{ por_estoque.ok }}</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </div>
+
+  <section class="card table-card">
+    <h2>Lotes que precisam de atenção</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Medicamento</th><th>Lote</th><th>Validade</th><th>Qtd. atual</th><th>Motivo</th></tr></thead>
+        <tbody>
+          {% for lote, validade, estoque in lotes_urgentes %}
+          <tr>
+            <td><strong>{{ lote.apresentacao }}</strong></td>
+            <td>{{ lote.numero_lote }}</td>
+            <td>{{ lote.data_validade|date:"d/m/Y" }}</td>
+            <td>{{ lote.quantidade_atual }}</td>
+            <td>
+              {% if validade == 'vencido' %}Vencido{% elif validade == 'critico' %}Validade crítica{% elif estoque == 'esgotado' %}Esgotado{% else %}Estoque baixo{% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="5" class="empty">Nenhum lote crítico. Estoque saudável.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
 </div>
 {% endblock %}

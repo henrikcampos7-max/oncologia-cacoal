@@ -39,6 +39,16 @@ urlpatterns = [
     path("sobras/", views.sobras, name="sobras"),
 path("transferencias/", views.transferencias, name="transferencias"),
     path("transferencias/<int:pk>/", views.detalhe_transferencia, name="detalhe_transferencia"),
+    path(
+        "transferencias/relatorio/importar/",
+        views.importar_relatorio_conferencia,
+        name="importar_relatorio_conferencia",
+    ),
+    path(
+        "transferencias/<int:pk>/conferencia/",
+        views.conferencia_transferencia,
+        name="conferencia_transferencia",
+    ),
     path("importacoes/", views.importacoes, name="importacoes"),
     path("importacoes/preparar/", views.importacao_preparar, name="importacao_preparar"),
     path("relatorios/", views.relatorios, name="relatorios"),

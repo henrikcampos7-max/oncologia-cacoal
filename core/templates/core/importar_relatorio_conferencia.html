@@ -1,0 +1,27 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<section class="card">
+  <h2>Importar relatório de transferência (Ji-Paraná → Cacoal)</h2>
+  <p>Envie o PDF original do relatório. O sistema extrai os itens (descrição,
+  lote, validade e quantidade), detecta duplicidade por hash e cria a
+  transferência para conferência automatizada.</p>
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <p>
+      <label>Clínica de origem</label><br>
+      <select name="clinica_origem" required>
+        <option value="">Selecione...</option>
+        {% for clinica in clinicas_origem %}
+        <option value="{{ clinica.pk }}">{{ clinica.nome }}</option>
+        {% endfor %}
+      </select>
+    </p>
+    <p>
+      <label>Arquivo PDF do relatório</label><br>
+      <input type="file" name="relatorio" accept="application/pdf,.pdf" required>
+    </p>
+    <button class="button primary" type="submit">Importar relatório</button>
+    <a class="button secondary" href="{% url 'transferencias' %}">Voltar</a>
+  </form>
+</section>
+{% endblock %}

@@ -32,6 +32,9 @@
     <button class="button primary" type="submit" name="criar_transferencia">＋ Criar transferência</button>
   </form>
 </section>
+<p>
+  <a class="button secondary" href="{% url 'importar_relatorio_conferencia' %}">Importar relatório PDF (Ji-Paraná → Cacoal)</a>
+</p>
 {% endif %}
 
 <section class="card table-card">
@@ -70,7 +73,12 @@
           <td>{{ transferencia.get_status_display }}</td>
           <td>{{ transferencia.itens.count }}</td>
           <td>{{ transferencia.criado_em|date:"d/m/Y H:i" }}</td>
-          <td><a href="{% url 'detalhe_transferencia' transferencia.pk %}" class="button small">Abrir</a></td>
+          <td>
+            <a href="{% url 'detalhe_transferencia' transferencia.pk %}" class="button small">Abrir</a>
+            {% if transferencia.importada %}
+            <a href="{% url 'conferencia_transferencia' transferencia.pk %}" class="button small primary">Conferir</a>
+            {% endif %}
+          </td>
         </tr>
         {% empty %}
         <tr><td colspan="6" class="empty">Nenhuma transferência recebida.</td></tr>

@@ -32,6 +32,8 @@ from .forms import (
 from .models import (
     Apresentacao,
     Clinica,
+    DivergenciaTransferencia,
+    ExtracaoEvidencia,
     ItemPedidoCompra,
     ItemProtocolo,
     ItemTransferencia,
@@ -47,6 +49,7 @@ from .models import (
     SobraReal,
     SolicitacaoAcesso,
     Transferencia,
+    TransferenciaEvidencia,
 )
 from .services import (
     calcular_estoque_disponivel_apresentacao,
@@ -55,6 +58,7 @@ from .services import (
     enviar_alertas_por_email,
     importar_gmed,
     importar_medicamentos,
+    importar_transferencia_pdf,
     importar_transferencias,
     inspecionar_importacao,
     processar_baixa_estoque_sessao,
@@ -63,6 +67,17 @@ from .services import (
     resumir_sessoes,
     sobras_reais_expiradas,
     sobras_reais_validas,
+)
+from .reconciliacao import (
+    atualizar_status_itens_transferencia,
+    derivar_status_conferencia,
+    integrar_ao_estoque,
+    reconciliar_item,
+)
+from .vision import processar_evidencia, resumo_aprovacao
+from .conferencia import (
+    sincronizar_status_operacional,
+    transicionar,
 )
 
 
@@ -1623,5 +1638,233 @@ def auditoria(request):
 
     contexto.update(registros=registros, perfis=perfis)
     return render(request, "core/auditoria.html", contexto)
+
+
+@login_required
+def importar_relatorio_conferencia(request):
+    """Importa o PDF do relatório de transferência de Ji-Paraná (Fase 3)."""
+    contexto = _contexto(request, "Importar Relatório de Transferência")
+    clinica, perfil = contexto["clinica"], contexto["perfil"]
+    if not clinica:
+        return HttpResponse("Clínica não encontrada.", status=404)
+    if not _pode_editar(
+        perfil, {PerfilUsuario.Papel.ADMINISTRADOR, PerfilUsuario.Papel.FARMACEUTICO}
+    ):
+        return HttpResponse("Sem permissão.", status=403)
+
+    clinicas_origem = Clinica.objects.filter(ativa=True).exclude(pk=clinica.pk).order_by("nome")
+
+    if request.method == "POST":
+        arquivo = request.FILES.get("relatorio")
+        origem_pk = request.POST.get("clinica_origem")
+        if not arquivo or not origem_pk:
+            messages.error(request, "Informe o arquivo PDF e a clínica de origem.")
+            return redirect("importar_relatorio_conferencia")
+        if not arquivo.name.lower().endswith(".pdf"):
+            messages.error(request, "Somente arquivos PDF são aceitos.")
+            return redirect("importar_relatorio_conferencia")
+        origem = Clinica.objects.filter(pk=origem_pk).first()
+        if origem is None:
+            messages.error(request, "Clínica de origem inválida.")
+            return redirect("importar_relatorio_conferencia")
+        transferencia, reconhecidos, erros = importar_transferencia_pdf(
+            origem, clinica, arquivo, usuario=request.user
+        )
+        for erro in erros:
+            messages.warning(request, erro)
+        if transferencia is None:
+            messages.error(request, "Relatório não importado.")
+            return redirect("importar_relatorio_conferencia")
+        messages.success(
+            request,
+            f"Relatório importado: transferência {transferencia.numero} com "
+            f"{len(reconhecidos)} item(ns). Confira as pendências.",
+        )
+        return redirect("conferencia_transferencia", pk=transferencia.pk)
+
+    contexto.update(clinicas_origem=clinicas_origem)
+    return render(request, "core/importar_relatorio_conferencia.html", contexto)
+
+
+@login_required
+def conferencia_transferencia(request, pk):
+    """Tela de conferência automatizada: evidências → extração → reconciliação.
+
+    Aceita upload de fotos (com ou sem dados manuais), resolução de
+    divergências e mostra o estado atual da conferência.
+    """
+    contexto = _contexto(request, "Conferência de Transferência")
+    clinica, perfil = contexto["clinica"], contexto["perfil"]
+    if not clinica:
+        return HttpResponse("Clínica não encontrada.", status=404)
+    if not _pode_editar(
+        perfil, {PerfilUsuario.Papel.ADMINISTRADOR, PerfilUsuario.Papel.FARMACEUTICO}
+    ):
+        return HttpResponse("Sem permissão.", status=403)
+
+    transferencia = (
+        Transferencia.objects.filter(pk=pk, clinica_destino=clinica)
+        .select_related("clinica_origem", "clinica_destino", "criado_por")
+        .first()
+    )
+    if transferencia is None:
+        return HttpResponse("Transferência não encontrada.", status=404)
+
+    if request.method == "POST":
+        acao = request.POST.get("acao")
+        if acao == "adicionar_evidencia":
+            arquivo = request.FILES.get("foto")
+            item_pk = request.POST.get("item")
+            if not arquivo or not item_pk:
+                messages.error(request, "Envie a foto e selecione o item.")
+                return redirect("conferencia_transferencia", pk=pk)
+            item = transferencia.itens.filter(pk=item_pk).first()
+            if item is None:
+                messages.error(request, "Item de transferência inválido.")
+                return redirect("conferencia_transferencia", pk=pk)
+            dados = {}
+            validade_raw = request.POST.get("validade", "").strip()
+            validade = None
+            if validade_raw:
+                try:
+                    validade = date.fromisoformat(validade_raw)
+                except ValueError:
+                    messages.error(request, "Validade deve estar em formato YYYY-MM-DD.")
+                    return redirect("conferencia_transferencia", pk=pk)
+            dados.update(
+                {
+                    "nome_produto": request.POST.get("nome_produto", "").strip()
+                    or str(item.apresentacao),
+                    "lote": request.POST.get("lote", "").strip(),
+                    "validade": validade,
+                    "quantidade": request.POST.get("quantidade", "").strip(),
+                    "confianca_produto": 1.0,
+                }
+            )
+            try:
+                _, extracao = processar_evidencia(
+                    transferencia,
+                    arquivo,
+                    usuario=request.user,
+                    item=item,
+                    dados=dados,
+                )
+            except ValueError as exc:
+                messages.error(request, str(exc))
+                return redirect("conferencia_transferencia", pk=pk)
+            observado = {
+                "produto_observado": item.apresentacao,
+                "lote": extracao.lote,
+                "validade": extracao.validade,
+                "quantidade": extracao.quantidade,
+                "foto_insuficiente": extracao.requer_revisao,
+                "confianca_final": _confianca_consolidada(extracao),
+            }
+            reconciliar_item(item, observado, usuario=request.user)
+            derivar_status_conferencia(transferencia, usuario=request.user)
+            if extracao.requer_revisao:
+                messages.warning(request, "Evidência exige revisão manual (campos ausentes).")
+            else:
+                messages.success(request, "Evidência processada e reconciliada.")
+            return redirect("conferencia_transferencia", pk=pk)
+
+        if acao == "resolver_divergencia":
+            from .reconciliacao import resolver_divergencia
+
+            divergencia = transferencia.divergencias.filter(
+                pk=request.POST.get("divergencia"),
+                status=DivergenciaTransferencia.StatusResolucao.PENDENTE,
+            ).first()
+            if divergencia is None:
+                messages.error(request, "Divergência não encontrada.")
+            else:
+                resolver_divergencia(
+                    divergencia, request.user, request.POST.get("resolucao", "").strip()
+                )
+                derivar_status_conferencia(transferencia, usuario=request.user)
+                messages.success(request, "Divergência resolvida.")
+            return redirect("conferencia_transferencia", pk=pk)
+
+        if acao == "aprovar":
+            if (
+                transferencia.status_conferencia
+                != Transferencia.StatusConferencia.PRONTA_PARA_APROVACAO
+            ):
+                messages.error(request, "Transferência não está pronta para aprovação.")
+                return redirect("conferencia_transferencia", pk=pk)
+            transicionar(
+                transferencia,
+                Transferencia.StatusConferencia.APROVADA,
+                usuario=request.user,
+                motivo="Aprovação da conferência pelo farmacêutico responsável.",
+            )
+            sincronizar_status_operacional(transferencia)
+            messages.success(request, "Conferência aprovada.")
+            return redirect("conferencia_transferencia", pk=pk)
+
+        if acao == "integrar_estoque":
+            if transferencia.status_conferencia != Transferencia.StatusConferencia.APROVADA:
+                messages.error(request, "Somente conferências aprovadas integram o estoque.")
+                return redirect("conferencia_transferencia", pk=pk)
+            with transaction.atomic():
+                try:
+                    entradas = integrar_ao_estoque(transferencia, request.user)
+                except ValueError as exc:
+                    messages.error(request, str(exc))
+                    return redirect("conferencia_transferencia", pk=pk)
+                transicionar(
+                    transferencia,
+                    Transferencia.StatusConferencia.INTEGRADA_AO_ESTOQUE,
+                    usuario=request.user,
+                    motivo=f"{len(entradas)} lote(s) criados no estoque de destino.",
+                )
+                sincronizar_status_operacional(transferencia)
+            registrar_auditoria(
+                clinica,
+                request.user,
+                "Integração ao estoque (conferência automatizada)",
+                f"Transferência {transferencia.numero}: {len(entradas)} lotes de entrada.",
+                request=request,
+            )
+            messages.success(request, "Transferência integrada ao estoque.")
+            return redirect("detalhe_transferencia", pk=pk)
+
+    itens = transferencia.itens.select_related(
+        "apresentacao__medicamento", "reconciliacao"
+    )
+    evidencias = transferencia.evidencias.select_related("item").prefetch_related(
+        "extracoes"
+    )
+    divergencias = transferencia.divergencias.select_related("item", "resolvida_por").order_by(
+        "-criada_em"
+    )
+    contexto.update(
+        transferencia=transferencia,
+        itens=itens,
+        evidencias=evidencias,
+        divergencias=divergencias,
+        pode_aprovar=(
+            transferencia.status_conferencia
+            == Transferencia.StatusConferencia.PRONTA_PARA_APROVACAO
+        ),
+        pode_integrar=(
+            transferencia.status_conferencia == Transferencia.StatusConferencia.APROVADA
+        ),
+    )
+    return render(request, "core/conferencia_transferencia.html", contexto)
+
+
+def _confianca_consolidada(extracao):
+    """Confiança final consolidada da extração (média simples dos campos)."""
+    valores = [
+        extracao.confianca_produto,
+        extracao.confianca_lote,
+        extracao.confianca_validade,
+        extracao.confianca_quantidade,
+    ]
+    presentes = [float(v) for v in valores if v is not None]
+    if not presentes:
+        return None
+    return round(sum(presentes) / len(presentes), 2)
 
 

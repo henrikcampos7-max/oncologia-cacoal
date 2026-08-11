@@ -1,8 +1,11 @@
 from django.contrib import admin
 
 from .models import (
+    AliasMedicamento,
     Apresentacao,
     Clinica,
+    DivergenciaTransferencia,
+    ExtracaoEvidencia,
     ImportacaoArquivo,
     ItemPedidoCompra,
     ItemProtocolo,
@@ -14,11 +17,13 @@ from .models import (
     PedidoCompra,
     PerfilUsuario,
     Protocolo,
+    ReconciliacaoItemTransferencia,
     RegistroAuditoria,
     SessaoTratamento,
     SobraReal,
     SolicitacaoAcesso,
     Transferencia,
+    TransferenciaEvidencia,
 )
 
 
@@ -151,6 +156,48 @@ class SobraRealAdmin(admin.ModelAdmin):
     list_filter = ("clinica", "status")
     search_fields = ("apresentacao__medicamento__nome", "lote__codigo")
     readonly_fields = ("status", "data_reutilizacao", "data_descarte", "criada_por", "criada_em")
+
+
+@admin.register(AliasMedicamento)
+class AliasMedicamentoAdmin(admin.ModelAdmin):
+    list_display = ("alias", "medicamento", "clinica")
+    list_filter = ("clinica",)
+    search_fields = ("alias", "medicamento__nome")
+
+
+class ExtracaoEvidenciaInline(admin.StackedInline):
+    model = ExtracaoEvidencia
+    extra = 0
+    readonly_fields = ("criado_em",)
+
+
+@admin.register(TransferenciaEvidencia)
+class TransferenciaEvidenciaAdmin(admin.ModelAdmin):
+    list_display = ("pk", "transferencia", "item", "status", "suspeita_duplicidade", "criado_em")
+    list_filter = ("status", "suspeita_duplicidade")
+    search_fields = ("transferencia__numero", "hash_arquivo")
+    inlines = (ExtracaoEvidenciaInline,)
+
+
+@admin.register(ReconciliacaoItemTransferencia)
+class ReconciliacaoItemTransferenciaAdmin(admin.ModelAdmin):
+    list_display = (
+        "item",
+        "status_final",
+        "match_produto",
+        "match_lote",
+        "match_quantidade",
+        "status_validade",
+        "confianca_final",
+    )
+    list_filter = ("status_final", "status_validade")
+
+
+@admin.register(DivergenciaTransferencia)
+class DivergenciaTransferenciaAdmin(admin.ModelAdmin):
+    list_display = ("transferencia", "tipo", "severidade", "status", "criada_em")
+    list_filter = ("tipo", "severidade", "status")
+    search_fields = ("transferencia__numero",)
 
 
 admin.site.site_header = "Oncologia Cacoal — Administração"

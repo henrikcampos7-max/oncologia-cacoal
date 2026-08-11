@@ -16,11 +16,13 @@ _TRANSICOES = {
     },
     Transferencia.StatusConferencia.RELATORIO_IMPORTADO: {
         Transferencia.StatusConferencia.EM_TRANSITO,
+        Transferencia.StatusConferencia.EM_CONFERENCIA,
         Transferencia.StatusConferencia.PENDENCIA_MANUAL,
         Transferencia.StatusConferencia.CANCELADA,
     },
     Transferencia.StatusConferencia.EM_TRANSITO: {
         Transferencia.StatusConferencia.AGUARDANDO_RECEBIMENTO,
+        Transferencia.StatusConferencia.EM_CONFERENCIA,
         Transferencia.StatusConferencia.PENDENCIA_MANUAL,
         Transferencia.StatusConferencia.CANCELADA,
     },

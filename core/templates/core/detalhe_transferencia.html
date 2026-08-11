@@ -41,6 +41,15 @@
 </section>
 
 {% if e_destino and pode_editar %}
+  {% if transferencia.importada %}
+<section class="card">
+  <h2>Conferência automatizada</h2>
+  <p>Transferência importada do relatório de {{ transferencia.clinica_origem.nome }}.
+     Abra a tela de conferência para registrar evidências fotográficas,
+     reconciliar itens e integrar ao estoque após aprovação.</p>
+  <a class="button primary" href="{% url 'conferencia_transferencia' transferencia.pk %}">Abrir conferência</a>
+</section>
+  {% endif %}
   {% if transferencia.status == 'em_transito' or recebivel_importada %}
 <section class="card">
   {% if recebivel_importada %}

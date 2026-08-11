@@ -243,20 +243,13 @@ def derivar_status_conferencia(transferencia, usuario=None):
         atual = transferencia.status_conferencia
         if not pode_transicionar(atual, destino):
             # Caminho intermediário: bloqueios (divergência/pendência) saem
-            # via EM_CONFERENCIA antes de avançar.
-            if (
-                transferencia.status_conferencia
-                == Transferencia.StatusConferencia.DIVERGENCIA
-                and pode_transicionar(
-                    Transferencia.StatusConferencia.DIVERGENCIA,
-                    Transferencia.StatusConferencia.EM_CONFERENCIA,
-                )
-            ):
+            # obrigatoriamente via EM_CONFERENCIA antes de avançar.
+            if pode_transicionar(atual, Transferencia.StatusConferencia.EM_CONFERENCIA):
                 transicionar(
                     transferencia,
                     Transferencia.StatusConferencia.EM_CONFERENCIA,
                     usuario=usuario,
-                    motivo="Reabertura após resolução de divergências.",
+                    motivo="Reabertura da conferência para avanço do fluxo.",
                 )
         if not pode_transicionar(transferencia.status_conferencia, destino):
             raise ValueError(

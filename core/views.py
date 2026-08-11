@@ -1768,6 +1768,48 @@ def conferencia_transferencia(request, pk):
                 messages.success(request, "Evidência processada e reconciliada.")
             return redirect("conferencia_transferencia", pk=pk)
 
+        if acao == "confirmar_item":
+            """Conferência assistida: confirmação manual do item (sem foto).
+
+            O relatório traz lote e quantidade esperados; o usuário confere a
+            embalagem e informa lote, validade e quantidade observados.
+            Validade é obrigatória aqui porque o relatório não a contém.
+            """
+            item_pk = request.POST.get("item")
+            item = transferencia.itens.filter(pk=item_pk).first()
+            if item is None:
+                messages.error(request, "Item de transferência inválido.")
+                return redirect("conferencia_transferencia", pk=pk)
+            lote = request.POST.get("lote", "").strip()
+            validade_raw = request.POST.get("validade", "").strip()
+            quantidade_raw = request.POST.get("quantidade", "").strip()
+            anotacoes = request.POST.get("anotacoes", "").strip()
+            if not lote or not validade_raw:
+                messages.error(request, "Confirmação manual exige lote e validade.")
+                return redirect("conferencia_transferencia", pk=pk)
+            try:
+                validade = date.fromisoformat(validade_raw)
+            except ValueError:
+                messages.error(request, "Validade deve estar em formato YYYY-MM-DD.")
+                return redirect("conferencia_transferencia", pk=pk)
+            try:
+                quantidade = int(quantidade_raw) if quantidade_raw else None
+            except ValueError:
+                messages.error(request, "Quantidade inválida.")
+                return redirect("conferencia_transferencia", pk=pk)
+            observado = {
+                "produto_observado": item.apresentacao,
+                "lote": lote,
+                "validade": validade,
+                "quantidade": quantidade,
+                "foto_insuficiente": False,
+                "confianca_final": 1.0,
+            }
+            reconciliar_item(item, observado, usuario=request.user, anotacoes=anotacoes)
+            derivar_status_conferencia(transferencia, usuario=request.user)
+            messages.success(request, "Item conferido manualmente e reconciliado.")
+            return redirect("conferencia_transferencia", pk=pk)
+
         if acao == "resolver_divergencia":
             from .reconciliacao import resolver_divergencia
 

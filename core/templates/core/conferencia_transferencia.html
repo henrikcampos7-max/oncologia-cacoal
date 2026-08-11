@@ -20,7 +20,7 @@
     <table>
       <thead>
         <tr>
-          <th>Item</th><th>Esperado</th><th>Observado</th><th>Reconciliação</th><th>Foto</th>
+          <th>Item</th><th>Esperado</th><th>Lote relatório</th><th>Observado</th><th>Reconciliação</th><th>Conferência manual</th>
         </tr>
       </thead>
       <tbody>
@@ -28,6 +28,7 @@
         <tr>
           <td><strong>{{ item.apresentacao.medicamento.nome }}</strong> — {{ item.apresentacao.descricao }}</td>
           <td>{{ item.quantidade }}</td>
+          <td>{{ item.lote_esperado|default:"—" }}</td>
           <td>
             {% if item.reconciliacao %}
               {% if item.reconciliacao.produto_observado %}{{ item.reconciliacao.produto_observado }}<br>{% endif %}
@@ -38,9 +39,19 @@
           </td>
           <td>{{ item.get_status_reconciliacao_display }}</td>
           <td>
-            {% for evidencia in item.evidencias.all %}
-            <a href="{{ evidencia.arquivo.url }}" target="_blank">evidência {{ forloop.counter }}</a>
-            {% empty %}sem foto{% endfor %}
+            {% if item.status_reconciliacao != 'conforme' and pode_aprovar != True %}
+            <form method="post" style="display:inline; white-space:nowrap;">
+              {% csrf_token %}
+              <input type="hidden" name="acao" value="confirmar_item">
+              <input type="hidden" name="item" value="{{ item.pk }}">
+              <input type="text" name="lote" placeholder="Lote" value="{{ item.reconciliacao.lote_observado|default:'' }}" style="width:110px;">
+              <input type="date" name="validade" style="width:140px;">
+              <input type="number" min="1" name="quantidade" placeholder="Qtd" style="width:70px;">
+              <button class="button secondary small" type="submit">Confirmar</button>
+            </form>
+            {% else %}
+              {% if item.status_reconciliacao == 'conforme' %}✓ conferido{% else %}{{ item.get_status_reconciliacao_display }}{% endif %}
+            {% endif %}
           </td>
         </tr>
         {% endfor %}

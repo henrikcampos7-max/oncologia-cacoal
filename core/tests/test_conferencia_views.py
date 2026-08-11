@@ -6,6 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.models import (
+    TransferenciaEvidencia,
     Apresentacao,
     Clinica,
     DivergenciaTransferencia,
@@ -13,9 +14,11 @@ from core.models import (
     Lote,
     Medicamento,
     MovimentacaoEstoque,
+    ReconciliacaoItemTransferencia,
+    StatusReconciliacao,
     Transferencia,
 )
-from core.tests.test_relatorio_pdf import montar_pdf_minimo
+from core.tests.test_relatorio_pdf import montar_pdf
 
 PASSWORD = "Password123456789!"
 
@@ -23,12 +26,14 @@ PASSWORD = "Password123456789!"
 def _pdf(nome="relatorio.pdf", *linhas):
     return SimpleUploadedFile(
         nome,
-        montar_pdf_minimo(
+        montar_pdf(
             *(
                 linhas
                 or [
-                    "1) Doxorrubicina 2 mg/mL 15/12/2026 LOTE-DOX-1 3",
-                    "Guia CT: 555444333",
+                    "UNIMEDJPR 02/07/2026 10:46",
+                    "Destino: Cacoal - Estoque: Estoque Principal Cacoal",
+                    "Tipo de Insumo: Medicamento",
+                    "3,0000 5,0000DOXORRUBICINA 2 MG/ML DOXORRUBICINA 2 MG/ML SOL INJ LOTEDOX1",
                 ]
             )
         ),
@@ -111,7 +116,7 @@ class ConferenciaViewsTests(TestCase):
                 "foto": SimpleUploadedFile(
                     "foto.png", b"\x89PNG", content_type="image/png"
                 ),
-                "lote": "LOTE-DOX-1",
+                "lote": "LOTEDOX1",
                 "validade": "2026-12-15",
                 "quantidade": "3",
             },
@@ -141,7 +146,7 @@ class ConferenciaViewsTests(TestCase):
             transferencia.status_conferencia,
             Transferencia.StatusConferencia.INTEGRADA_AO_ESTOQUE,
         )
-        lote = Lote.objects.get(apresentacao=self.apresentacao, numero_lote="LOTE-DOX-1")
+        lote = Lote.objects.get(apresentacao=self.apresentacao, numero_lote="LOTEDOX1")
         self.assertEqual(lote.quantidade_atual, 3)
         self.assertTrue(
             MovimentacaoEstoque.objects.filter(
@@ -213,4 +218,67 @@ class ConferenciaViewsTests(TestCase):
             {"clinica_origem": self.jiparana.pk, "relatorio": _pdf()},
         )
         self.assertEqual(Transferencia.objects.count(), 1)
+
+    def test_confirmacao_manual_sem_foto_reconcilia_o_item(self):
+        transferencia = self._transferencia()
+        item = ItemTransferencia.objects.get(transferencia=transferencia)
+        response = self.client.post(
+            reverse("conferencia_transferencia", kwargs={"pk": transferencia.pk}),
+            {
+                "acao": "confirmar_item",
+                "item": item.pk,
+                "lote": "LOTEDOX1",
+                "validade": "2026-12-15",
+                "quantidade": "3",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        item.refresh_from_db()
+        self.assertEqual(item.status_reconciliacao, StatusReconciliacao.CONFORME)
+        self.assertFalse(TransferenciaEvidencia.objects.exists())
+        transferencia.refresh_from_db()
+        self.assertEqual(
+            transferencia.status_conferencia,
+            Transferencia.StatusConferencia.PRONTA_PARA_APROVACAO,
+        )
+
+    def test_confirmacao_manual_exige_lote_e_validade(self):
+        transferencia = self._transferencia()
+        item = ItemTransferencia.objects.get(transferencia=transferencia)
+        response = self.client.post(
+            reverse("conferencia_transferencia", kwargs={"pk": transferencia.pk}),
+            {"acao": "confirmar_item", "item": item.pk, "lote": ""},
+        )
+        self.assertEqual(response.status_code, 302)
+        item.refresh_from_db()
+        self.assertEqual(item.status_reconciliacao, StatusReconciliacao.NAO_FOTOGRAFADO)
+        transferencia.refresh_from_db()
+        self.assertEqual(
+            transferencia.status_conferencia,
+            Transferencia.StatusConferencia.RELATORIO_IMPORTADO,
+        )
+
+    def test_confirmacao_manual_lote_divergente_gera_divergencia(self):
+        transferencia = self._transferencia()
+        item = ItemTransferencia.objects.get(transferencia=transferencia)
+        response = self.client.post(
+            reverse("conferencia_transferencia", kwargs={"pk": transferencia.pk}),
+            {
+                "acao": "confirmar_item",
+                "item": item.pk,
+                "lote": "OUTROLOTE",
+                "validade": "2026-12-15",
+                "quantidade": "3",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        item.refresh_from_db()
+        self.assertEqual(
+            item.status_reconciliacao, StatusReconciliacao.DIVERGENCIA_LOTE
+        )
+        self.assertTrue(
+            DivergenciaTransferencia.objects.filter(
+                item=item, tipo=DivergenciaTransferencia.Tipo.LOTE
+            ).exists()
+        )
         self.assertEqual(response.status_code, 302)

@@ -548,6 +548,8 @@ def importar_transferencia_pdf(clinica_origem, clinica_destino, relatorio, usuar
             transferencia=transferencia,
             apresentacao=item["apresentacao"],
             quantidade=item["quantidade"],
+            lote_esperado=item.get("lote", ""),
+            tipo_insumo=item.get("tipo_insumo", ""),
         )
         itens_criados += 1
 

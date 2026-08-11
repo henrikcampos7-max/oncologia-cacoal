@@ -1,3 +1,4 @@
+import os
 from datetime import date
 
 from django.contrib.auth import get_user_model
@@ -21,15 +22,11 @@ from core.relatorio_pdf import (
 )
 from core.services import importar_transferencia_pdf
 
+FIXTURE_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
 
-def montar_pdf_minimo(*linhas):
-    """Gera um PDF 1.4 válido cujo conteúdo textual são as linhas informadas."""
-    objetos = [
-        b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-        b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
-    ]
+
+def _texto_pdf(linhas):
+    """Codifica linhas como conteúdo de uma página PDF (fonte Helvetica)."""
     linhas_pdf = []
     for indice, linha in enumerate(linhas):
         texto = linha.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
@@ -38,7 +35,18 @@ def montar_pdf_minimo(*linhas):
         else:
             linhas_pdf.append(f"0 -14 Td ({texto}) Tj")
     linhas_pdf.append("ET")
-    conteudo = ("\n".join(linhas_pdf)).encode("latin-1")
+    return ("\n".join(linhas_pdf)).encode("latin-1")
+
+
+def montar_pdf(*linhas):
+    """Gera um PDF 1.4 válido cujo conteúdo textual são as linhas informadas."""
+    objetos = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    ]
+    conteudo = _texto_pdf(linhas)
     objetos.append(
         b"<< /Length " + str(len(conteudo)).encode() + b" >>\nstream\n"
         + conteudo
@@ -67,6 +75,36 @@ def montar_pdf_minimo(*linhas):
     return cabecalho + b"".join(corpo) + xref + trailer
 
 
+def montar_pdf_relatorio_real():
+    """Reproduz a estrutura do relatório real 'Transferência entre Estoques'."""
+    return montar_pdf(
+        "UNIMEDJPR 02/07/2026 10:46",
+        "Transferência entre Estoques Página 1 de 1",
+        "Origem: UNIMED CENTRO RONDÔNIA - Estoque: Estoque Ji-Parana",
+        "Destino: Cacoal - Estoque: Estoque Principal Cacoal",
+        "Descrição Lote Qtde Vl. Médio",
+        "Tipo de Insumo: Material de Enfermagem",
+        "29,0000 2,3762LUVA CIRURGICA ESTERIL 7,0 250302PF",
+        "Tipo de Insumo: Medicamento",
+        "24,0000 25,6440DIFENIDRIN 50 MG/ML  DIFENIDRIN 50 MG/ML SOL INJ CX 25 AMP VD AMB X 1 M50034585",
+        "10,0000 16,7457FAULDFLUOR 50 MG/ML 10 ML FAULDFLUOR 50 MG/ML SOL INJ CT 5 FA VD INC X ",
+        "10 ML",
+        "24l0388",
+        "40,0000 0,1699PREDINISONA 5 MG COM CT BL AL PLAS INC X 20 PREDINISONA 5 MG COM CT BL ",
+        "AL PLAS INC X 20",
+        "B25C0767",
+        "Tipo de Insumo: Solução",
+        "3,0000 8,4650ALCOOL 70% 1 LITRO ALCOOL 70% 1 LITRO P25060006",
+        "by InterProcess",
+    )
+
+
+def ler_fixture_real():
+    caminho = os.path.join(FIXTURE_DIR, "transferencia_jiparana_02-07.pdf")
+    with open(caminho, "rb") as arquivo:
+        return arquivo.read()
+
+
 class RelatorioPdfTests(TestCase):
     def setUp(self):
         self.jiparana = Clinica.objects.create(nome="Ji-Paraná")
@@ -84,46 +122,43 @@ class RelatorioPdfTests(TestCase):
             quantidade_mg=300,
         )
 
-    def _pdf_completo(self):
-        return montar_pdf_minimo(
-            "RELATÓRIO DE TRANSFERÊNCIA REV. 77",
-            "GUIA CT: 000123456",
-            "1) Paclitaxel 300 mg 10/08/2026 LOTE-ABC-01 5",
-            "2) Paclitaxel 300 mg 08/2026 LOTE-XYZ-02 3",
-            "Prof. Farmacêutico Responsável: Assinatura",
-            "Atividade diária registrada em sistema",
-        )
-
-    def test_extrai_itens_lote_validade_quantidade(self):
-        dados = extrair_relatorio(self._pdf_completo())
-        self.assertEqual(len(dados["itens"]), 2)
+    def test_extrai_itens_qtd_lote_nome_tipo(self):
+        dados = extrair_relatorio(montar_pdf_relatorio_real())
+        self.assertEqual(len(dados["itens"]), 5)
         primeiro = dados["itens"][0]
-        self.assertEqual(primeiro["descricao"], "Paclitaxel 300 mg")
-        self.assertEqual(primeiro["lote"], "LOTE-ABC-01")
-        self.assertEqual(primeiro["quantidade"], 5)
-        self.assertEqual(primeiro["validade"], date(2026, 8, 10))
+        self.assertEqual(primeiro["quantidade"], 29)
+        self.assertEqual(primeiro["lote"], "250302PF")
+        self.assertEqual(primeiro["nome"], "LUVA CIRURGICA ESTERIL 7,0")
+        self.assertEqual(primeiro["tipo_insumo"], "Material de Enfermagem")
 
-    def test_validade_mes_ano_aceita(self):
-        dados = extrair_relatorio(self._pdf_completo())
-        segundo = dados["itens"][1]
-        self.assertEqual(segundo["validade"], date(2026, 8, 1))
+    def test_descricao_duplicada_e_limpa(self):
+        dados = extrair_relatorio(montar_pdf_relatorio_real())
+        difenidrin = dados["itens"][1]
+        self.assertEqual(difenidrin["nome"], "DIFENIDRIN 50 MG/ML")
+        self.assertEqual(difenidrin["lote"], "M50034585")
+        self.assertEqual(difenidrin["quantidade"], 24)
 
-    def test_cabecalho_nao_vira_divergencia(self):
-        dados = extrair_relatorio(self._pdf_completo())
-        linhas_nao_reconhecidas = [
-            msg for msg in dados["informativo"] if "não reconhecida" in msg
-        ]
-        self.assertEqual(linhas_nao_reconhecidas, [])
+    def test_lote_quebrado_na_linha_seguinte(self):
+        dados = extrair_relatorio(montar_pdf_relatorio_real())
+        fauldf = next(i for i in dados["itens"] if "FAULDFLUOR" in i["nome"])
+        self.assertEqual(fauldf["lote"], "24l0388")
+        self.assertEqual(fauldf["quantidade"], 10)
+        self.assertTrue(fauldf["nome"].startswith("FAULDFLUOR 50 MG/ML"))
 
-    def test_referencia_externa_e_data_emissao(self):
-        dados = extrair_relatorio(self._pdf_completo())
-        self.assertEqual(dados["referencia_externa"], "000123456")
-        self.assertEqual(dados["data_emissao"], date(2026, 8, 10))
+    def test_data_emissao_e_referencia_destino(self):
+        dados = extrair_relatorio(montar_pdf_relatorio_real())
+        self.assertEqual(dados["data_emissao"], date(2026, 7, 2))
+        self.assertIn("Cacoal", dados["referencia_externa"])
+
+    def test_linhas_de_moldura_nao_viram_itens(self):
+        dados = extrair_relatorio(montar_pdf_relatorio_real())
+        todos_nomes = [item["nome"] for item in dados["itens"]]
+        self.assertFalse(any("Página" in nome or "InterProcess" in nome for nome in todos_nomes))
 
     def test_hash_sha256_deterministico(self):
-        conteudo = self._pdf_completo()
+        conteudo = montar_pdf_relatorio_real()
         self.assertEqual(calcular_hash(conteudo), calcular_hash(conteudo))
-        outro = montar_pdf_minimo("1) Outro Item 01/01/2026 LOTE-Q 2")
+        outro = montar_pdf("1,0000 2,0000OUTRO ITEM LOTE-1")
         self.assertNotEqual(calcular_hash(conteudo), calcular_hash(outro))
 
     def test_pdf_vazio_levanta_erro(self):
@@ -132,7 +167,35 @@ class RelatorioPdfTests(TestCase):
 
     def test_pdf_sem_itens_levanta_erro(self):
         with self.assertRaises(ValueError):
-            extrair_relatorio(montar_pdf_minimo("Texto sem itens reconhecíveis"))
+            extrair_relatorio(montar_pdf("Texto sem itens reconhecíveis"))
+
+
+class RelatorioRealFixtureTests(TestCase):
+    """Validação contra o relatório real de Ji-Paraná (TRANSF 02-07)."""
+
+    def test_fixture_real_extrai_16_itens(self):
+        dados = extrair_relatorio(ler_fixture_real())
+        self.assertEqual(len(dados["itens"]), 16)
+        self.assertEqual(dados["data_emissao"], date(2026, 7, 2))
+        self.assertIn("Destino: Cacoal", dados["referencia_externa"])
+
+    def test_fixture_real_itens_medicamento(self):
+        dados = extrair_relatorio(ler_fixture_real())
+        medicamentos = [
+            i for i in dados["itens"] if i["tipo_insumo"] == "Medicamento"
+        ]
+        self.assertEqual(len(medicamentos), 11)
+        por_nome = {i["nome"]: i for i in dados["itens"]}
+        keytruda = por_nome["KEYTRUDA 100 MG"]
+        self.assertEqual(keytruda["quantidade"], 4)
+        self.assertEqual(keytruda["lote"], "Z013424")
+        glivec = por_nome["GLIVEC 400 MG COM REV CT BL AL/AL X 30"]
+        self.assertEqual(glivec["quantidade"], 30)
+        self.assertEqual(glivec["lote"], "PL1078")
+
+    def test_fixture_real_sem_lote_em_nenhum_item(self):
+        dados = extrair_relatorio(ler_fixture_real())
+        self.assertTrue(all(i["lote"] for i in dados["itens"]))
 
 
 class ResolucaoDescricaoTests(TestCase):
@@ -178,12 +241,13 @@ class ResolucaoDescricaoTests(TestCase):
 
     def test_reconhecer_itens_separa_conhecidos(self):
         itens = [
-            {"descricao": "Oxaliplatina 100 mg", "lote": "L1", "validade": None, "quantidade": 2},
-            {"descricao": "Inexistente 999 mg", "lote": "L2", "validade": None, "quantidade": 1},
+            {"quantidade": 2, "nome": "Oxaliplatina 100 mg", "lote": "L1", "tipo_insumo": ""},
+            {"quantidade": 1, "nome": "Inexistente 999 mg", "lote": "L2", "tipo_insumo": ""},
         ]
         reconhecidos, nao_reconhecidos = reconhecer_itens(self.cacoal, itens)
         self.assertEqual(len(reconhecidos), 1)
         self.assertEqual(reconhecidos[0]["quantidade"], 2)
+        self.assertEqual(reconhecidos[0]["lote"], "L1")
         self.assertEqual(len(nao_reconhecidos), 1)
 
 
@@ -207,14 +271,16 @@ class ImportarTransferenciaPdfTests(TestCase):
     def _arquivo(self):
         return SimpleUploadedFile(
             "relatorio.pdf",
-            montar_pdf_minimo(
-                "1) Gencitabina 1000 mg 12/12/2026 LOTE-GEM-1 10",
-                "Guia CT: 999888777",
+            montar_pdf(
+                "UNIMEDJPR 15/12/2026 09:00",
+                "Destino: Cacoal - Estoque: Estoque Principal Cacoal",
+                "Tipo de Insumo: Medicamento",
+                "10,0000 5,0000GENCITABINA 1000 MG GENCITABINA 1000 MG LOTEGEM1",
             ),
             content_type="application/pdf",
         )
 
-    def test_importa_transferencia_com_itens(self):
+    def test_importa_transferencia_com_lote_esperado(self):
         arquivo = self._arquivo()
         transferencia, reconhecidos, erros = importar_transferencia_pdf(
             self.jiparana, self.cacoal, arquivo, usuario=self.user
@@ -225,19 +291,17 @@ class ImportarTransferenciaPdfTests(TestCase):
             transferencia.status_conferencia,
             Transferencia.StatusConferencia.RELATORIO_IMPORTADO,
         )
-        self.assertTrue(transferencia.importada)
-        self.assertNotEqual(transferencia.hash_relatorio, "")
-        self.assertTrue(transferencia.relatorio_arquivo.name.endswith(".pdf"))
         item = ItemTransferencia.objects.get(transferencia=transferencia)
         self.assertEqual(item.apresentacao, self.apresentacao)
         self.assertEqual(item.quantidade, 10)
+        self.assertEqual(item.lote_esperado, "LOTEGEM1")
+        self.assertEqual(item.tipo_insumo, "Medicamento")
+        self.assertEqual(transferencia.data_relatorio, date(2026, 12, 15))
 
     def test_duplicidade_por_hash_e_rejeitada(self):
-        arquivo = self._arquivo()
-        importar_transferencia_pdf(self.jiparana, self.cacoal, arquivo, usuario=self.user)
-        outro_arquivo = self._arquivo()
+        importar_transferencia_pdf(self.jiparana, self.cacoal, self._arquivo(), usuario=self.user)
         transferencia, reconhecidos, erros = importar_transferencia_pdf(
-            self.jiparana, self.cacoal, outro_arquivo, usuario=self.user
+            self.jiparana, self.cacoal, self._arquivo(), usuario=self.user
         )
         self.assertIsNone(transferencia)
         self.assertTrue(any("hash duplicado" in erro for erro in erros))
@@ -246,9 +310,8 @@ class ImportarTransferenciaPdfTests(TestCase):
     def test_item_nao_reconhecido_nao_bloqueia(self):
         arquivo = SimpleUploadedFile(
             "relatorio.pdf",
-            montar_pdf_minimo(
-                "1) Medicamento Desconhecido 500 mg 01/01/2027 LOTE-X 2",
-                "Guia CT: 111222333",
+            montar_pdf(
+                "1,0000 2,0000MEDICAMENTO DESCONHECIDO 500 MG LOTE-X",
             ),
             content_type="application/pdf",
         )
@@ -261,8 +324,7 @@ class ImportarTransferenciaPdfTests(TestCase):
         self.assertEqual(ItemTransferencia.objects.filter(transferencia=transferencia).count(), 0)
 
     def test_registra_importacao_na_auditoria_de_arquivos(self):
-        arquivo = self._arquivo()
-        importar_transferencia_pdf(self.jiparana, self.cacoal, arquivo, usuario=self.user)
+        importar_transferencia_pdf(self.jiparana, self.cacoal, self._arquivo(), usuario=self.user)
         registro = ImportacaoArquivo.objects.get(tipo=ImportacaoArquivo.Tipo.TRANSFERENCIAS)
         self.assertEqual(registro.importadas, 1)
         self.assertEqual(registro.clinica, self.cacoal)

@@ -519,6 +519,16 @@ class ItemTransferencia(models.Model):
         default=StatusReconciliacao.NAO_FOTOGRAFADO,
         help_text="Status da conferência automatizada (mantido em sincronia com a reconciliação).",
     )
+    lote_esperado = models.CharField(
+        max_length=80,
+        blank=True,
+        help_text="Lote informado no relatório de transferência (Ji-Paraná).",
+    )
+    tipo_insumo = models.CharField(
+        max_length=60,
+        blank=True,
+        help_text="Seção do relatório: Medicamento, Material de Enfermagem, Solução etc.",
+    )
 
     def __str__(self):
         return f"{self.transferencia.numero} — {self.apresentacao} x {self.quantidade}"

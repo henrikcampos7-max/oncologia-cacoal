@@ -1,8 +1,27 @@
 """Parser do relatório de transferência (Ji-Paraná → Cacoal) em PDF.
 
-Fase 3 do módulo: extração textual com pypdf, hash SHA-256 para deduplicação,
-normalização de nomes e resolução de aliases contra o cadastro local
-(SKILLS 03/04/05). Não altera dados: apenas lê o PDF e devolve estrutura.
+Formato real "Transferência entre Estoques" (InterProcess/Unimed JPR):
+
+    UNIMEDJPR 02/07/2026 10:46
+    Transferência entre Estoques Página 1 de 1
+    Origem: UNIMED CENTRO RONDÔNIA - Estoque: Estoque Ji-Parana
+    Destino: Cacoal - Estoque: Estoque Principal Cacoal
+    Descrição Lote Qtde Vl. Médio
+    Tipo de Insumo: Medicamento
+    24,0000 25,6440DIFENIDRIN 50 MG/ML  DIFENIDRIN ... X 1 M50034585
+    10,0000 16,7457FAULDFLUOR 50 MG/ML ... X
+    10 ML
+    24l0388
+
+Padrões observados:
+- cada item começa com `QTD,0000 VALOR,MEDIO` (sem espaço entre valor e descrição);
+- a descrição aparece duplicada (nome curto + descrição completa);
+- o LOTE é o último token da linha (pode quebrar para a linha seguinte);
+- seções separadas por "Tipo de Insumo: ...";
+- o relatório NÃO contém validade — cabe à conferência obtê-la.
+
+Fase 3 do módulo: extração textual com pypdf, hash SHA-256 para deduplicação
+e resolução de aliases contra o cadastro local (SKILLS 03/04/05).
 """
 
 import hashlib
@@ -11,24 +30,18 @@ from datetime import datetime
 
 from .services import normalizar_texto
 
-# Padrões de linha do relatório "rev. 77": item | descrição | ... | validade | lote | quantidade.
-_PADRAO_ITEM = re.compile(
-    r"^\s*(\d{1,4})[.)]\s+(?P<descricao>.+?)\s+"
-    r"(?P<validade>\d{2}/\d{2}/\d{4}|\d{2}/\d{4})\s+"
-    r"(?P<lote>[A-Za-z0-9\-_./]{2,30})\s+"
-    r"(?P<quantidade>\d{1,6})\s*$"
-)
-_PADRAO_ITEM_SEM_LOTE = re.compile(
-    r"^\s*(\d{1,4})[.)]\s+(?P<descricao>.+?)\s+"
-    r"(?P<validade>\d{2}/\d{2}/\d{4}|\d{2}/\d{4})\s+"
-    r"(?P<quantidade>\d{1,6})\s*$"
-)
-_PADRAO_DATA_RELATORIO = re.compile(r"(\d{2}/\d{2}/\d{4})")
-_PADRAO_REFERENCIA = re.compile(
-    r"(?:ct[\.:]?\s*|guia\s*[:#]\s*|ref[\.:]?\s*)([A-Z]{0,6}\s?\d{3,10}[A-Z]{0,3})",
+# Início de item: "24,0000 25,6440" (qtde inteira + valor com vírgula).
+_PADRAO_INICIO_ITEM = re.compile(r"^\s*(\d+),\d{4}\s+\d+,\d{4}")
+# Lote: token único alfanumérico sem espaços (3–12 caracteres).
+_PADRAO_LOTE = re.compile(r"^[A-Za-z0-9]{3,12}$")
+# Cabeçalho: data no formato "UNIMEDJPR 02/07/2026 10:46".
+_PADRAO_DATA_RELATORIO = re.compile(r"\b(\d{2}/\d{2}/\d{4})\b")
+# Linhas de moldura (origem/destino/página/rodapé).
+_PADRAO_MOLDE = re.compile(
+    r"^(origem:|destino:|transfer[^\w]|p[áa]gina|by interprocess|descri[çc][ãa]o lote)",
     re.IGNORECASE,
 )
-_CAMPOS_OPCIONAIS = (r"atividade", r"prof\.", r"farmac\w*", r"rev\.?\s*\d+")
+_PADRAO_TIPO_INSUMO = re.compile(r"^tipo de insumo:\s*(.+)$", re.IGNORECASE)
 
 _ERROS = (ValueError, IndexError, KeyError, TypeError, AttributeError)
 
@@ -59,35 +72,128 @@ def _extrair_texto(conteudo: bytes) -> str:
 
 
 def _parsear_data(texto):
-    for padrao in (_PADRAO_DATA_RELATORIO,):
-        for grupo in padrao.findall(texto):
-            try:
-                valores = grupo.split("/")
-                if len(valores) == 3:
-                    return datetime(int(valores[2]), int(valores[1]), int(valores[0])).date()
-            except ValueError:
-                continue
+    grupo = _PADRAO_DATA_RELATORIO.search(texto)
+    if grupo:
+        try:
+            dia, mes, ano = grupo.group(1).split("/")
+            return datetime(int(ano), int(mes), int(dia)).date()
+        except ValueError:
+            return None
     return None
 
 
-def _parsear_referencia(texto):
+def _parsear_destino(texto):
     for linha in texto.splitlines():
-        grupo = _PADRAO_REFERENCIA.search(linha)
-        if grupo:
-            return grupo.group(1).strip()
+        if linha.strip().lower().startswith("destino:"):
+            return linha.strip()
     return ""
 
 
+def _remover_duplicacao(texto):
+    """Remove prefixo repetido do relatório (nome curto duplicado na linha)."""
+    partes = texto.split()
+    for corte in range(len(partes) // 2, 0, -1):
+        if partes[:corte] == partes[corte:2 * corte] and corte >= 2:
+            return " ".join(partes[:corte]), " ".join(partes[corte:])
+    return texto, ""
+
+
+def _limpar_descricao(descricao):
+    """Colapsa espaços e remove a repetição "nome nome-descrição-completa"."""
+    descricao = " ".join(descricao.split())
+    _, sem_duplicacao = _remover_duplicacao(descricao)
+    return sem_duplicacao or descricao
+
+
+def _separar_nome_e_descricao(descricao):
+    """Separa o nome curto (segmento duplicado/primeiro bloco) da descrição."""
+    nome, resto = _remover_duplicacao(descricao)
+    if nome and resto:
+        return nome, resto
+    partes = descricao.split("  ")
+    if len(partes) > 1:
+        nome = partes[0].strip()
+        resto = " ".join(p.strip() for p in partes[1:] if p.strip())
+        if resto:
+            return nome, resto
+    return descricao, ""
+
+
+def _linhas_para_itens(texto):
+    """Quebra o texto bruto em blocos: (item, tipo_insumo_atual)."""
+    blocos = []
+    atual = {"linhas": [], "tipo": ""}
+    for linha in texto.splitlines():
+        l = linha.strip()
+        if not l:
+            continue
+        tipo = _PADRAO_TIPO_INSUMO.search(l)
+        if tipo:
+            if atual["linhas"]:
+                blocos.append(atual)
+                atual = {"linhas": [], "tipo": ""}
+            atual["tipo"] = tipo.group(1).strip()
+            continue
+        if _PADRAO_INICIO_ITEM.match(l):
+            if atual["linhas"]:
+                blocos.append(atual)
+            atual = {"linhas": [l], "tipo": atual["tipo"]}
+            continue
+        if _PADRAO_MOLDE.match(l):
+            continue
+        if atual["linhas"]:
+            atual["linhas"].append(l)
+    if atual["linhas"]:
+        blocos.append(atual)
+    return blocos
+
+
+def _extrair_lote_das_linhas(linhas):
+    """Lote = último token alfanumérico compacto (pode estar na linha seguinte)."""
+    texto = " ".join(linhas)
+    tokens = texto.split()
+    for indice in range(len(tokens) - 1, -1, -1):
+        if _PADRAO_LOTE.match(tokens[indice]):
+            return tokens[indice], indice
+    return "", -1
+
+
+def _montar_itens(blocos):
+    itens = []
+    for bloco in blocos:
+        inicio = _PADRAO_INICIO_ITEM.match(bloco["linhas"][0])
+        quantidade = int(inicio.group(1))
+        primeira = _PADRAO_INICIO_ITEM.sub("", bloco["linhas"][0])
+        tokens = " ".join([primeira] + bloco["linhas"][1:]).split()
+        lote = ""
+        for indice in range(len(tokens) - 1, -1, -1):
+            if _PADRAO_LOTE.match(tokens[indice]):
+                lote = tokens.pop(indice)
+                break
+        descricao = " ".join(tokens)
+        nome, descricao_completa = _separar_nome_e_descricao(descricao)
+        itens.append(
+            {
+                "quantidade": quantidade,
+                "descricao": _limpar_descricao(descricao_completa) or nome,
+                "nome": nome,
+                "lote": lote,
+                "tipo_insumo": bloco["tipo"],
+            }
+        )
+    return itens
+
+
 def extrair_relatorio(conteudo: bytes) -> dict:
-    """Extrai dados do relatório: cabeçalho + itens (descrição, lote, validade, quantidade).
+    """Extrai dados do relatório: cabeçalho + itens (nome, descrição, lote, quantidade).
 
     Retorna:
         {
             "hash": str,
             "referencia_externa": str,
             "data_emissao": date | None,
-            "itens": [{"descricao", "validade", "lote", "quantidade"}, ...],
-            "informativo": list[str],   # avisos de normalização (ex.: sem lote)
+            "itens": [{"nome", "descricao", "lote", "quantidade", "tipo_insumo"}, ...],
+            "informativo": list[str],
         }
     """
     if not conteudo:
@@ -96,74 +202,31 @@ def extrair_relatorio(conteudo: bytes) -> dict:
     if not texto.strip():
         raise ValueError("Não foi possível extrair texto do PDF.")
 
-    itens = []
+    blocos = _linhas_para_itens(texto)
+    itens = _montar_itens(blocos)
     informativo = []
-    for linha in texto.splitlines():
-        for padrao in (_PADRAO_ITEM, _PADRAO_ITEM_SEM_LOTE):
-            grupo = padrao.match(linha.strip())
-            if not grupo:
-                continue
-            dados = grupo.groupdict()
-            lote = (dados.get("lote") or "").strip()
-            if not lote:
-                informativo.append(
-                    f"Item sem lote identificado: {dados['descricao'][:60]}"
-                )
-            try:
-                validade = datetime.strptime(dados["validade"], "%d/%m/%Y").date()
-            except ValueError:
-                try:
-                    validade = datetime.strptime(dados["validade"], "%m/%Y").date()
-                except ValueError:
-                    validade = None
-                    informativo.append(
-                        f"Validade com formato não reconhecido: {dados['validade']}"
-                    )
-            itens.append(
-                {
-                    "descricao": (dados["descricao"] or "").strip(),
-                    "validade": validade,
-                    "lote": lote,
-                    "quantidade": int(dados["quantidade"]),
-                }
+    for item in itens:
+        if not item.get("lote"):
+            informativo.append(
+                f"Item sem lote identificado: {(item.get('nome') or item.get('descricao'))[:60]}"
             )
-            break
-        else:
-            if _encontra_cabecalho_opcional(linha):
-                continue
-            if _linha_e_cabecalho_consumido(linha):
-                continue
-            informativo.append(f"Linha não reconhecida: {linha.strip()[:80]}")
     if not itens:
         raise ValueError("Nenhum item de transferência reconhecido no relatório.")
 
     return {
         "hash": calcular_hash(conteudo),
-        "referencia_externa": _parsear_referencia(texto),
+        "referencia_externa": _parsear_destino(texto),
         "data_emissao": _parsear_data(texto),
         "itens": itens,
         "informativo": informativo,
     }
 
 
-def _encontra_cabecalho_opcional(linha):
-    """Linhas de cabeçalho/rodapé (atividade, assinatura, revisão) não são divergências."""
-    l = normalizar_texto(linha)
-    if not l:
-        return True
-    return any(re.search(p, l) for p in _CAMPOS_OPCIONAIS)
-
-
-def _linha_e_cabecalho_consumido(linha):
-    """Linhas que alimentam cabeçalho (referência externa / data) são silenciosas."""
-    return bool(_PADRAO_REFERENCIA.search(linha)) or bool(_PADRAO_DATA_RELATORIO.search(linha))
-
-
 def resolver_descricao(clinica, descricao):
     """Resolve a descrição do relatório para apresentação cadastrada.
 
     Usa aliases aprovados (AliasMedicamento) e, em segundo lugar, a busca
-    fuzzy por nome do medicamento. Nunca cria registros.
+    por nome do medicamento. Nunca cria registros.
     """
     from .models import AliasMedicamento, Medicamento
 
@@ -176,42 +239,35 @@ def resolver_descricao(clinica, descricao):
                 return apresentacoes[0], alias.medicamento, True
 
     for medicamento in Medicamento.objects.filter(clinica=clinica):
-        primeira_palavra = chave.split(" ")[0] if chave else ""
         nome = normalizar_texto(medicamento.nome)
-        if primeira_palavra and nome.startswith(primeira_palavra):
+        if chave and nome and (nome.startswith(chave) or chave.startswith(nome)):
             apresentacoes = list(medicamento.apresentacoes.filter(ativa=True))
             if apresentacoes:
                 return apresentacoes[0], medicamento, False
     return None, None, False
 
 
-def _itera_itens_relatorio(clinica, itens):
-    """Reconhece cada item do relatório em apresentação local ou alias.
-
-    Retorno: (lista_ok, lista_nao_reconhecidos, detalhes)
-    """
+def reconhecer_itens(clinica, itens):
+    """Interface pública: itens extraídos → (itens reconhecidos, não reconhecidos)."""
     reconhecidos = []
     nao_reconhecidos = []
     for item in itens:
-        apresentacao, medicamento, via_alias = resolver_descricao(clinica, item["descricao"])
+        candidato = item.get("nome") or item.get("descricao")
+        apresentacao, medicamento, via_alias = resolver_descricao(clinica, candidato)
         if apresentacao is None:
             nao_reconhecidos.append(
-                {"descricao": item["descricao"], "motivo": "medicamento não cadastrado"}
+                {"descricao": candidato, "motivo": "medicamento não cadastrado"}
             )
             continue
         reconhecidos.append(
             {
                 "apresentacao": apresentacao,
                 "quantidade": item["quantidade"],
-                "lote": item["lote"],
-                "validade": item["validade"],
+                "lote": item.get("lote", ""),
+                "validade": item.get("validade"),
+                "tipo_insumo": item.get("tipo_insumo", ""),
                 "via_alias": via_alias,
-                "descricao_original": item["descricao"],
+                "descricao_original": candidato,
             }
         )
     return reconhecidos, nao_reconhecidos
-
-
-def reconhecer_itens(clinica, itens):
-    """Interface pública: itens extraídos → (itens reconhecidos, não reconhecidos)."""
-    return _itera_itens_relatorio(clinica, itens)

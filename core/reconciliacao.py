@@ -133,9 +133,24 @@ def reconciliar_item(item, observado, usuario=None, anotacoes=""):
 
     class_validade = classificar_validade(validade)
     reconciliacao.status_validade = class_validade
-    # Sem lote esperado persistido no item (o relatório não guarda lote por item),
-    # o lote informado na evidência é aceito; ausência fica "não verificado".
-    reconciliacao.match_lote = True if lote else None
+    # O relatório traz o lote esperado por item; a comparação é real quando
+    # ambos existem. Sem esperado, o lote informado é aceito (não verificado).
+    if lote and item.lote_esperado:
+        reconciliacao.match_lote = lote.strip().upper() == item.lote_esperado.strip().upper()
+        if not reconciliacao.match_lote:
+            reconciliacao.status_final = StatusReconciliacao.DIVERGENCIA_LOTE
+            reconciliacao.save()
+            registrar_divergencia(
+                transferencia,
+                DivergenciaTransferencia.Tipo.LOTE,
+                item.lote_esperado,
+                lote,
+                severidade=DivergenciaTransferencia.Severidade.CRITICA,
+                item=item,
+            )
+            return reconciliacao
+    else:
+        reconciliacao.match_lote = True if lote else None
     reconciliacao.match_quantidade = (
         quantidade is not None and quantidade == item.quantidade
     )

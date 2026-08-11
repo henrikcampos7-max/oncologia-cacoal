@@ -1,0 +1,33 @@
+{% extends 'core/base.html' %}
+{% block content %}
+{% if pode_editar %}
+<section class="card">
+  <h2>Enviar planilha (.xlsx)</h2>
+  <p>Após o envio você escolherá a aba e mapeará as colunas antes da importação efetiva.</p>
+  <form method="post" enctype="multipart/form-data" class="form-grid">{% csrf_token %}{{ form.as_p }}<button class="button primary" type="submit" name="enviar_arquivo">Enviar e preparar importação</button></form>
+</section>
+{% endif %}
+
+<section class="card table-card">
+  <h2>Histórico de importações</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Arquivo</th><th>Aba</th><th>Importadas</th><th>Com erro</th><th>Usuário</th><th>Data</th></tr></thead>
+      <tbody>
+        {% for item in historico %}
+        <tr>
+          <td>{{ item.nome_arquivo }}</td>
+          <td>{{ item.aba }}</td>
+          <td>{{ item.importadas }}</td>
+          <td>{% if item.com_erro %}<span style="color:#dc2626; font-weight:bold;">{{ item.com_erro }}</span>{% else %}0{% endif %}</td>
+          <td>{{ item.usuario.username|default:"—" }}</td>
+          <td>{{ item.data_hora|date:"d/m/Y H:i" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="empty">Nenhuma importação registrada.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

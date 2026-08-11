@@ -2,7 +2,15 @@ from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import AuthenticationForm
 
-from .models import Apresentacao, Medicamento, Paciente, Protocolo, SessaoTratamento
+from .models import (
+    Apresentacao,
+    Clinica,
+    Medicamento,
+    Paciente,
+    PerfilUsuario,
+    Protocolo,
+    SessaoTratamento,
+)
 
 
 class EmailOuUsuarioAuthenticationForm(AuthenticationForm):
@@ -197,6 +205,41 @@ class ItemProtocoloForm(forms.ModelForm):
             self.fields["apresentacao"].queryset = Apresentacao.objects.filter(
                 medicamento__clinica=clinica, ativa=True
             ).select_related("medicamento")
+
+
+class SolicitacaoAcessoForm(forms.ModelForm):
+    class Meta:
+        from .models import SolicitacaoAcesso
+        model = SolicitacaoAcesso
+        fields = ["nome_completo", "email", "clinica", "papel_solicitado", "justificativa"]
+        labels = {
+            "nome_completo": "Nome completo",
+            "email": "E-mail",
+            "clinica": "Clínica",
+            "papel_solicitado": "Perfil desejado",
+            "justificativa": "Justificativa",
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["clinica"].queryset = Clinica.objects.filter(ativa=True)
+        self.fields["clinica"].required = False
+        self.fields["justificativa"].required = False
+
+
+class ImportacaoArquivoForm(forms.Form):
+    arquivo = forms.FileField(
+        label="Arquivo XLSX",
+        help_text="Somente arquivos .xlsx são aceitos.",
+    )
+
+    def clean_arquivo(self):
+        arquivo = self.cleaned_data["arquivo"]
+        if not arquivo.name.lower().endswith(".xlsx"):
+            raise forms.ValidationError("Formato inválido. Envie um arquivo .xlsx.")
+        if arquivo.size > 10 * 1024 * 1024:
+            raise forms.ValidationError("Arquivo muito grande (máximo 10 MB).")
+        return arquivo
 
 
 class ApresentacaoForm(forms.ModelForm):

@@ -348,3 +348,111 @@ class ItemPedidoCompra(models.Model):
         return max(0, self.quantidade - self.quantidade_recebida)
 
 
+class Transferencia(models.Model):
+    class Status(models.TextChoices):
+        RASCUNHO = "rascunho", "Rascunho"
+        EM_TRANSITO = "em_transito", "Em trânsito"
+        RECEBIDA = "recebida", "Recebida"
+        CANCELADA = "cancelada", "Cancelada"
+
+    clinica_origem = models.ForeignKey(
+        Clinica, on_delete=models.PROTECT, related_name="transferencias_enviadas"
+    )
+    clinica_destino = models.ForeignKey(
+        Clinica, on_delete=models.PROTECT, related_name="transferencias_recebidas"
+    )
+    numero = models.CharField(max_length=30)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.RASCUNHO)
+    criado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    recebido_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    observacao = models.CharField(max_length=500, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    data_recebimento = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-criado_em"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["clinica_origem", "numero"], name="transferencia_origem_numero_unico"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.numero} ({self.get_status_display()})"
+
+    def gerar_numero(self):
+        ano = self.criado_em.year if self.criado_em else timezone.now().year
+        sequencia = Transferencia.objects.filter(
+            clinica_origem=self.clinica_origem, numero__startswith=f"TR-{ano}-"
+        ).count() + 1
+        return f"TR-{ano}-{sequencia:04d}"
+
+
+class ItemTransferencia(models.Model):
+    transferencia = models.ForeignKey(
+        Transferencia, on_delete=models.CASCADE, related_name="itens"
+    )
+    apresentacao = models.ForeignKey(Apresentacao, on_delete=models.PROTECT)
+    quantidade = models.PositiveIntegerField()
+    quantidade_recebida = models.PositiveIntegerField(default=0)
+
+    def __str__(self):
+        return f"{self.transferencia.numero} — {self.apresentacao} x {self.quantidade}"
+
+    @property
+    def restante(self):
+        return max(0, self.quantidade - self.quantidade_recebida)
+
+
+class SolicitacaoAcesso(models.Model):
+    class Status(models.TextChoices):
+        PENDENTE = "pendente", "Pendente"
+        APROVADA = "aprovada", "Aprovada"
+        REJEITADA = "rejeitada", "Rejeitada"
+
+    nome_completo = models.CharField(max_length=180)
+    email = models.EmailField()
+    clinica = models.ForeignKey(
+        Clinica, on_delete=models.SET_NULL, null=True, blank=True, related_name="solicitacoes_acesso"
+    )
+    papel_solicitado = models.CharField(max_length=20, choices=PerfilUsuario.Papel.choices)
+    justificativa = models.CharField(max_length=500, blank=True)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDENTE)
+    analisado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    data_hora = models.DateTimeField(auto_now_add=True)
+    data_analise = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-data_hora"]
+
+    def __str__(self):
+        return f"{self.nome_completo} ({self.email}) — {self.get_status_display()}"
+
+
+class ImportacaoArquivo(models.Model):
+    clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name="importacoes")
+    nome_arquivo = models.CharField(max_length=255)
+    aba = models.CharField(max_length=120)
+    total_linhas = models.PositiveIntegerField(default=0)
+    importadas = models.PositiveIntegerField(default=0)
+    com_erro = models.PositiveIntegerField(default=0)
+    erros = models.TextField(blank=True)
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    data_hora = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-data_hora"]
+
+    def __str__(self):
+        return f"{self.nome_arquivo} — {self.aba} ({self.importadas} importadas)"
+
+

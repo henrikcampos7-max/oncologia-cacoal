@@ -59,6 +59,163 @@ def registrar_auditoria(clinica, usuario, acao, detalhes="", request=None):
     )
 
 
+def processar_saida_lotes(clinica, apresentacao, quantidade, usuario=None, observacao=""):
+    from .models import Lote, MovimentacaoEstoque
+
+    restante = quantidade
+    movimentos = []
+    for lote in Lote.objects.filter(
+        clinica=clinica,
+        apresentacao=apresentacao,
+        ativo=True,
+        quantidade_atual__gt=0,
+    ).order_by("data_validade"):
+        if restante <= 0:
+            break
+        deduzir = min(lote.quantidade_disponivel, restante)
+        if deduzir <= 0:
+            continue
+        lote.quantidade_atual -= deduzir
+        lote.save()
+        restante -= deduzir
+        movimentos.append(
+            MovimentacaoEstoque.objects.create(
+                clinica=clinica,
+                lote=lote,
+                tipo=MovimentacaoEstoque.TipoMovimentacao.SAIDA,
+                quantidade=-deduzir,
+                usuario=usuario,
+                observacao=observacao,
+            )
+        )
+    return restante == 0, movimentos
+
+
+def calcular_estoque_disponivel_apresentacao(clinica, apresentacao):
+    from .models import Lote
+
+    return sum(
+        lote.quantidade_disponivel
+        for lote in Lote.objects.filter(clinica=clinica, apresentacao=apresentacao, ativo=True)
+    )
+
+
+def inspecionar_importacao(caminho_arquivo, max_linhas_previa=5):
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(caminho_arquivo, read_only=True, data_only=True)
+    abas = []
+    for nome_aba in workbook.sheetnames:
+        planilha = workbook[nome_aba]
+        linhas = planilha.iter_rows(values_only=True)
+        cabecalhos = []
+        total = 0
+        previa = []
+        for indice, linha in enumerate(linhas):
+            if indice == 0:
+                cabecalhos = [str(valor).strip() if valor is not None else "" for valor in linha]
+                continue
+            total += 1
+            if len(previa) < max_linhas_previa:
+                previa.append(list(linha))
+        abas.append(
+            {
+                "nome": nome_aba,
+                "colunas": cabecalhos,
+                "total_linhas": total,
+                "previa": previa,
+            }
+        )
+    workbook.close()
+    return abas
+
+
+def importar_medicamentos(clinica, caminho_arquivo, nome_aba, mapeamento, usuario=None):
+    import os
+    from decimal import Decimal, InvalidOperation
+
+    from openpyxl import load_workbook
+
+    from .models import Apresentacao, ImportacaoArquivo, Medicamento
+
+    colunas = {indice: campo for campo, indice in mapeamento.items() if campo}
+    if not colunas:
+        return 0, 0, ["Nenhuma coluna mapeada."], []
+
+    workbook = load_workbook(caminho_arquivo, read_only=True, data_only=True)
+    if nome_aba not in workbook.sheetnames:
+        workbook.close()
+        return 0, 0, [f"Aba '{nome_aba}' não encontrada no arquivo."], []
+
+    planilha = workbook[nome_aba]
+    importadas, com_erro = 0, 0
+    erros = []
+    novas_apresentacoes = []
+    for numero, linha in enumerate(planilha.iter_rows(values_only=True), start=1):
+        if numero == 1:
+            continue
+        if not any(valor not in (None, "") for valor in linha):
+            continue
+        try:
+            dados = {}
+            for indice, campo in colunas.items():
+                dados[campo] = str(linha[indice]).strip() if indice < len(linha) and linha[indice] is not None else ""
+            if not dados.get("nome"):
+                erros.append(f"Linha {numero}: medicamento sem nome.")
+                com_erro += 1
+                continue
+            if not dados.get("descricao"):
+                erros.append(f"Linha {numero} ({dados['nome']}): apresentação sem descrição.")
+                com_erro += 1
+                continue
+            quantidade_mg = dados.get("quantidade_mg") or ""
+            try:
+                quantidade_mg = Decimal(quantidade_mg.replace(",", "."))
+            except InvalidOperation:
+                erros.append(
+                    f"Linha {numero} ({dados['nome']}): quantidade em mg inválida ('{quantidade_mg}')."
+                )
+                com_erro += 1
+                continue
+            if quantidade_mg <= 0:
+                erros.append(f"Linha {numero} ({dados['nome']}): quantidade em mg deve ser maior que zero.")
+                com_erro += 1
+                continue
+            medicamento, _ = Medicamento.objects.get_or_create(
+                clinica=clinica,
+                nome=dados["nome"].strip(),
+                defaults={"principio_ativo": dados.get("principio_ativo", "").strip()},
+            )
+            apresentacao, criada = Apresentacao.objects.get_or_create(
+                medicamento=medicamento,
+                descricao=dados["descricao"].strip(),
+                defaults={
+                    "concentracao": dados.get("concentracao", "").strip(),
+                    "quantidade_mg": quantidade_mg,
+                    "ativa": True,
+                },
+            )
+            if criada:
+                novas_apresentacoes.append(apresentacao)
+            importadas += 1
+        except Exception as exc:
+            erros.append(f"Linha {numero}: erro inesperado ({exc}).")
+            com_erro += 1
+    workbook.close()
+
+    ImportacaoArquivo.objects.create(
+        clinica=clinica,
+        nome_arquivo=os.path.basename(caminho_arquivo),
+        aba=nome_aba,
+        total_linhas=importadas + com_erro,
+        importadas=importadas,
+        com_erro=com_erro,
+        erros="\n".join(erros[:100]),
+        usuario=usuario,
+    )
+    return importadas, com_erro, erros, novas_apresentacoes
+
+
 def calcular_sugestao_compras(clinica, dias=30, margem_seguranca=5):
     from datetime import timedelta
 

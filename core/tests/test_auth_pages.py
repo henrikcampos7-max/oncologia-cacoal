@@ -1,4 +1,4 @@
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
 
@@ -18,9 +18,11 @@ class PublicPagesTests(SimpleTestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn(reverse("login"), response.url)
 
+
+class AccessRequestPageTests(TestCase):
     def test_access_request_does_not_collect_credentials(self):
         response = self.client.get(reverse("solicitar_acesso"))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Solicitar acesso")
-        self.assertContains(response, "Nenhuma senha é enviada")
+        self.assertContains(response, "Um administrador analisará a solicitação")

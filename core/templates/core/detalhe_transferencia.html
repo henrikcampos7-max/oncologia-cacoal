@@ -1,0 +1,70 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<section class="card">
+  <h2>Transferência {{ transferencia.numero }}</h2>
+  <p><strong>Status:</strong> {{ transferencia.get_status_display }} ·
+     <strong>Origem:</strong> {{ transferencia.clinica_origem.nome }} ·
+     <strong>Destino:</strong> {{ transferencia.clinica_destino.nome }} ·
+     <strong>Criada por:</strong> {{ transferencia.criado_por.username|default:"—" }}
+     {% if transferencia.recebido_por %}· <strong>Recebida por:</strong> {{ transferencia.recebido_por.username }}{% endif %}
+  </p>
+  <p>{{ transferencia.observacao|default:"" }}</p>
+
+  {% if transferencia.status == 'rascunho' and e_origem and pode_editar %}
+  <form method="post" style="display:inline;">{% csrf_token %}<button class="button secondary" type="submit" name="acao" value="enviar">Enviar (baixar estoque na origem)</button></form>
+  <form method="post" style="display:inline;">{% csrf_token %}<button class="button danger" type="submit" name="acao" value="cancelar" onclick="return confirm('Cancelar esta transferência?');">Cancelar</button></form>
+  {% endif %}
+  {% if transferencia.status == 'em_transito' and e_origem and pode_editar %}
+  <form method="post" style="display:inline;">{% csrf_token %}<button class="button danger" type="submit" name="acao" value="cancelar" onclick="return confirm('Cancelar esta transferência em trânsito?');">Cancelar</button></form>
+  {% endif %}
+</section>
+
+<section class="card table-card">
+  <h2>Itens da transferência</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Medicamento / Apresentação</th><th>Quantidade</th><th>Recebido</th><th>Restante</th></tr></thead>
+      <tbody>
+        {% for item in itens %}
+        <tr>
+          <td><strong>{{ item.apresentacao.medicamento.nome }}</strong> — {{ item.apresentacao.descricao }}</td>
+          <td>{{ item.quantidade }}</td>
+          <td>{{ item.quantidade_recebida }}</td>
+          <td>{{ item.restante }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4" class="empty">Transferência sem itens.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if transferencia.status == 'em_transito' and e_destino and pode_editar %}
+<section class="card">
+  <h2>Registrar recebimento</h2>
+  <p>Confirme as quantidades recebidas. Informe lote e validade para criar os lotes no estoque de destino.</p>
+  <form method="post">
+    {% csrf_token %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Item</th><th>Recebido?</th><th>Nº lote</th><th>Validade (AAAA-MM-DD)</th></tr></thead>
+        <tbody>
+          {% for item in itens %}
+          {% if item.restante > 0 %}
+          <tr>
+            <td>{{ item.apresentacao.medicamento.nome }} — {{ item.apresentacao.descricao }} (faltam {{ item.restante }})</td>
+            <td><input type="number" min="0" max="{{ item.restante }}" name="recebido_{{ item.pk }}" style="width:90px;"></td>
+            <td><input type="text" name="lote_{{ item.pk }}" style="width:120px;"></td>
+            <td><input type="date" name="validade_{{ item.pk }}"></td>
+          </tr>
+          {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <button class="button primary" type="submit" name="acao" value="receber">Registrar recebimento</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

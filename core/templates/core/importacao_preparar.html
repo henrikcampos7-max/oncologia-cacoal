@@ -1,0 +1,76 @@
+{% extends 'core/base.html' %}
+{% block content %}
+{% if resultado_importacao %}
+<section class="card">
+  <h2>Resultado da importação</h2>
+  <p><strong>Importadas:</strong> {{ resultado_importacao.importadas }} · <strong>Com erro:</strong> {{ resultado_importacao.com_erro }}</p>
+  {% if resultado_importacao.erros %}
+  <h3>Erros ({{ resultado_importacao.erros|length }})</h3>
+  <ul>
+    {% for erro in resultado_importacao.erros %}<li>{{ erro }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  <a class="button primary" href="{% url 'importacoes' %}">Voltar às importações</a>
+</section>
+{% else %}
+<section class="card">
+  <h2>Preparação — {{ nome_arquivo }}</h2>
+  <p>Selecione a aba, mapeie as colunas da planilha para os campos do sistema e confirme. A prévia mostra as primeiras 5 linhas (cabeçalho ignorado).</p>
+  <form method="post">
+    {% csrf_token %}
+    <label>Aba da planilha
+      <select name="aba" required>
+        {% for aba in abas %}<option value="{{ aba.nome }}">{{ aba.nome }} ({{ aba.total_linhas }} linhas)</option>{% endfor %}
+      </select>
+    </label>
+    {% for aba in abas %}
+    <details>
+      <summary>Aba "{{ aba.nome }}": colunas {{ aba.colunas|length }}, {{ aba.total_linhas }} linhas de dados</summary>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>{% for coluna in aba.colunas %}<th>{{ coluna|default:"(sem nome)" }}</th>{% endfor %}</tr></thead>
+          <tbody>
+            {% for linha in aba.previa %}<tr>{% for valor in linha %}<td>{{ valor|default:"" }}</td>{% endfor %}</tr>{% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <h3>Mapeamento das colunas</h3>
+      <div class="form-grid">
+        <label>Nome do medicamento *
+          <select name="map_nome" required>
+            <option value="">— não mapeado —</option>
+            {% for coluna in aba.colunas %}{% if coluna %}<option value="{{ forloop.counter0 }}">{{ coluna }}</option>{% endif %}{% endfor %}
+          </select>
+        </label>
+        <label>Princípio ativo
+          <select name="map_principio_ativo">
+            <option value="">— não mapeado —</option>
+            {% for coluna in aba.colunas %}{% if coluna %}<option value="{{ forloop.counter0 }}">{{ coluna }}</option>{% endif %}{% endfor %}
+          </select>
+        </label>
+        <label>Apresentação (descrição) *
+          <select name="map_descricao" required>
+            <option value="">— não mapeado —</option>
+            {% for coluna in aba.colunas %}{% if coluna %}<option value="{{ forloop.counter0 }}">{{ coluna }}</option>{% endif %}{% endfor %}
+          </select>
+        </label>
+        <label>Concentração
+          <select name="map_concentracao">
+            <option value="">— não mapeado —</option>
+            {% for coluna in aba.colunas %}{% if coluna %}<option value="{{ forloop.counter0 }}">{{ coluna }}</option>{% endif %}{% endfor %}
+          </select>
+        </label>
+        <label>Quantidade (mg) por frasco *
+          <select name="map_quantidade_mg" required>
+            <option value="">— não mapeado —</option>
+            {% for coluna in aba.colunas %}{% if coluna %}<option value="{{ forloop.counter0 }}">{{ coluna }}</option>{% endif %}{% endfor %}
+          </select>
+        </label>
+      </div>
+    </details>
+    {% endfor %}
+    <button class="button primary" type="submit" name="confirmar_importacao">Confirmar importação</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

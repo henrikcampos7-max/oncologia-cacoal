@@ -1,0 +1,82 @@
+{% extends 'core/base.html' %}
+{% block content %}
+{% if pode_editar %}
+<section class="card">
+  <h2>Nova transferência entre unidades</h2>
+  <p>Selecione o destino e as quantidades disponíveis para envio. O estoque é baixado na origem ao enviar.</p>
+  <form method="post" class="form-grid">
+    {% csrf_token %}
+    <label>Clínica de destino
+      <select name="clinica_destino" required>
+        <option value="">Selecione…</option>
+        {% for clinica in clinicas_destino %}<option value="{{ clinica.pk }}">{{ clinica.nome }}</option>{% endfor %}
+      </select>
+    </label>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Medicamento / Apresentação</th><th>Disponível</th><th>Qtd. a transferir</th></tr></thead>
+        <tbody>
+          {% for apresentacao in apresentacoes %}
+          <tr>
+            <td><strong>{{ apresentacao.medicamento.nome }}</strong> — {{ apresentacao.descricao }}</td>
+            <td>{{ apresentacao.disponivel }} frascos</td>
+            <td><input type="number" min="0" name="qtd_{{ apresentacao.pk }}" style="width:90px;"></td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="3" class="empty">Nenhuma apresentação com estoque cadastrado nesta clínica.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <label>Observação <input type="text" name="observacao" placeholder="Opcional"></label>
+    <button class="button primary" type="submit" name="criar_transferencia">＋ Criar transferência</button>
+  </form>
+</section>
+{% endif %}
+
+<section class="card table-card">
+  <h2>Transferências enviadas</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Número</th><th>Destino</th><th>Status</th><th>Itens</th><th>Criado em</th><th></th></tr></thead>
+      <tbody>
+        {% for transferencia in transferencias %}
+        <tr>
+          <td><strong>{{ transferencia.numero }}</strong></td>
+          <td>{{ transferencia.clinica_destino.nome }}</td>
+          <td>{{ transferencia.get_status_display }}</td>
+          <td>{{ transferencia.itens.count }}</td>
+          <td>{{ transferencia.criado_em|date:"d/m/Y H:i" }}</td>
+          <td><a href="{% url 'detalhe_transferencia' transferencia.pk %}" class="button small">Abrir</a></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="empty">Nenhuma transferência enviada.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card table-card">
+  <h2>Transferências recebidas</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Número</th><th>Origem</th><th>Status</th><th>Itens</th><th>Criado em</th><th></th></tr></thead>
+      <tbody>
+        {% for transferencia in recebidas %}
+        <tr>
+          <td><strong>{{ transferencia.numero }}</strong></td>
+          <td>{{ transferencia.clinica_origem.nome }}</td>
+          <td>{{ transferencia.get_status_display }}</td>
+          <td>{{ transferencia.itens.count }}</td>
+          <td>{{ transferencia.criado_em|date:"d/m/Y H:i" }}</td>
+          <td><a href="{% url 'detalhe_transferencia' transferencia.pk %}" class="button small">Abrir</a></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="empty">Nenhuma transferência recebida.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

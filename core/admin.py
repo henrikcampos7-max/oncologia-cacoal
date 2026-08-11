@@ -3,8 +3,10 @@ from django.contrib import admin
 from .models import (
     Apresentacao,
     Clinica,
+    ImportacaoArquivo,
     ItemPedidoCompra,
     ItemProtocolo,
+    ItemTransferencia,
     Lote,
     Medicamento,
     MovimentacaoEstoque,
@@ -14,6 +16,8 @@ from .models import (
     Protocolo,
     RegistroAuditoria,
     SessaoTratamento,
+    SolicitacaoAcesso,
+    Transferencia,
 )
 
 
@@ -103,6 +107,33 @@ class PedidoCompraAdmin(admin.ModelAdmin):
     list_filter = ("clinica", "status")
     search_fields = ("numero", "fornecedor")
     inlines = (ItemPedidoCompraInline,)
+
+
+class ItemTransferenciaInline(admin.TabularInline):
+    model = ItemTransferencia
+    extra = 0
+
+
+@admin.register(Transferencia)
+class TransferenciaAdmin(admin.ModelAdmin):
+    list_display = ("numero", "clinica_origem", "clinica_destino", "status", "criado_em")
+    list_filter = ("clinica_origem", "clinica_destino", "status")
+    search_fields = ("numero",)
+    inlines = (ItemTransferenciaInline,)
+
+
+@admin.register(SolicitacaoAcesso)
+class SolicitacaoAcessoAdmin(admin.ModelAdmin):
+    list_display = ("nome_completo", "email", "clinica", "papel_solicitado", "status", "data_hora")
+    list_filter = ("status", "clinica", "papel_solicitado")
+    search_fields = ("nome_completo", "email")
+
+
+@admin.register(ImportacaoArquivo)
+class ImportacaoArquivoAdmin(admin.ModelAdmin):
+    list_display = ("nome_arquivo", "clinica", "aba", "importadas", "com_erro", "data_hora")
+    list_filter = ("clinica",)
+    search_fields = ("nome_arquivo", "aba")
 
 
 admin.site.site_header = "Oncologia Cacoal — Administração"

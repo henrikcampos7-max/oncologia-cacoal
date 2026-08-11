@@ -1,0 +1,50 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<section class="card table-card">
+  <h2>Solicitações pendentes ({{ pendentes|length }})</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Nome</th><th>E-mail</th><th>Clínica</th><th>Perfil</th><th>Justificativa</th><th>Ações</th></tr></thead>
+      <tbody>
+        {% for solicitacao in pendentes %}
+        <tr>
+          <td><strong>{{ solicitacao.nome_completo }}</strong></td>
+          <td>{{ solicitacao.email }}</td>
+          <td>{{ solicitacao.clinica.nome|default:"—" }}</td>
+          <td>{{ solicitacao.get_papel_solicitado_display }}</td>
+          <td>{{ solicitacao.justificativa|default:"—" }}</td>
+          <td>
+            <form method="post" style="display:inline;">{% csrf_token %}<input type="hidden" name="pk" value="{{ solicitacao.pk }}"><button class="button small primary" type="submit" name="acao" value="aprovar">Aprovar</button></form>
+            <form method="post" style="display:inline;">{% csrf_token %}<input type="hidden" name="pk" value="{{ solicitacao.pk }}"><button class="button small danger" type="submit" name="acao" value="rejeitar">Rejeitar</button></form>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="empty">Nenhuma solicitação pendente.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card table-card">
+  <h2>Histórico</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Nome</th><th>E-mail</th><th>Status</th><th>Analisado por</th><th>Data</th></tr></thead>
+      <tbody>
+        {% for solicitacao in historico %}
+        <tr>
+          <td>{{ solicitacao.nome_completo }}</td>
+          <td>{{ solicitacao.email }}</td>
+          <td>{{ solicitacao.get_status_display }}</td>
+          <td>{{ solicitacao.analisado_por.username|default:"—" }}</td>
+          <td>{{ solicitacao.data_analise|date:"d/m/Y H:i"|default:"—" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="empty">Nenhuma solicitação analisada.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

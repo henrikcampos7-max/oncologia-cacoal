@@ -1,18 +1,22 @@
 import csv
+import os
 from datetime import date, timedelta
 
 from django.contrib import messages
+from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError, transaction
 from django.db.models import F
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
+from django.utils.crypto import get_random_string
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
 
 from .forms import (
     ApresentacaoForm,
+    ImportacaoArquivoForm,
     ItemProtocoloForm,
     LoteForm,
     MedicamentoApresentacaoForm,
@@ -22,11 +26,14 @@ from .forms import (
     PeriodoForm,
     ProtocoloForm,
     SessaoTratamentoForm,
+    SolicitacaoAcessoForm,
 )
 from .models import (
     Apresentacao,
+    Clinica,
     ItemPedidoCompra,
     ItemProtocolo,
+    ItemTransferencia,
     Lote,
     Medicamento,
     MovimentacaoEstoque,
@@ -36,10 +43,16 @@ from .models import (
     Protocolo,
     RegistroAuditoria,
     SessaoTratamento,
+    SolicitacaoAcesso,
+    Transferencia,
 )
 from .services import (
+    calcular_estoque_disponivel_apresentacao,
     calcular_sugestao_compras,
+    importar_medicamentos,
+    inspecionar_importacao,
     processar_baixa_estoque_sessao,
+    processar_saida_lotes,
     registrar_auditoria,
     resumir_sessoes,
 )
@@ -53,7 +66,88 @@ def health(request):
 
 
 def solicitar_acesso(request):
-    return render(request, "core/solicitar_acesso.html")
+    form = SolicitacaoAcessoForm(request.POST or None)
+    if request.method == "POST":
+        if form.is_valid():
+            form.save()
+            messages.success(
+                request,
+                "Solicitação enviada. Um administrador analisará e criará seu acesso.",
+            )
+            return redirect("solicitar_acesso")
+    return render(request, "core/solicitar_acesso.html", {"form": form})
+
+
+@login_required
+def solicitacoes_acesso(request):
+    perfil = _perfil(request)
+    if not perfil or perfil.papel != PerfilUsuario.Papel.ADMINISTRADOR:
+        return HttpResponse("Perfil sem permissão para analisar solicitações.", status=403)
+
+    if request.method == "POST":
+        solicitacao = SolicitacaoAcesso.objects.filter(
+            pk=request.POST.get("pk"), status=SolicitacaoAcesso.Status.PENDENTE
+        ).first()
+        acao = request.POST.get("acao")
+        if solicitacao:
+            if acao == "aprovar":
+                senha_temporaria = get_random_string(length=15)
+                username = solicitacao.email.split("@")[0][:150]
+                username_base, contador = username, 1
+                while get_user_model().objects.filter(username__iexact=username).exists():
+                    contador += 1
+                    username = f"{username_base}{contador}"
+                usuario, _ = get_user_model().objects.get_or_create(
+                    email=solicitacao.email.lower(),
+                    defaults={"username": username},
+                )
+                if not usuario.username:
+                    usuario.username = username
+                usuario.set_password(senha_temporaria)
+                usuario.save()
+                PerfilUsuario.objects.update_or_create(
+                    usuario=usuario,
+                    defaults={"clinica": solicitacao.clinica or perfil.clinica, "papel": solicitacao.papel_solicitado, "ativo": True},
+                )
+                solicitacao.status = SolicitacaoAcesso.Status.APROVADA
+                solicitacao.analisado_por = request.user
+                solicitacao.data_analise = timezone.now()
+                solicitacao.save()
+                registrar_auditoria(
+                    perfil.clinica or solicitacao.clinica,
+                    request.user,
+                    "Aprovação de solicitação de acesso",
+                    f"Acesso aprovado para {solicitacao.nome_completo} ({solicitacao.email}).",
+                    request=request,
+                )
+                messages.success(
+                    request,
+                    f"Acesso aprovado para {solicitacao.nome_completo}. "
+                    f"Usuário: {usuario.username} — Senha temporária: {senha_temporaria} "
+                    "(compartilhe com o solicitante; ele poderá alterar depois).",
+                )
+            elif acao == "rejeitar":
+                solicitacao.status = SolicitacaoAcesso.Status.REJEITADA
+                solicitacao.analisado_por = request.user
+                solicitacao.data_analise = timezone.now()
+                solicitacao.save()
+                registrar_auditoria(
+                    perfil.clinica or solicitacao.clinica,
+                    request.user,
+                    "Rejeição de solicitação de acesso",
+                    f"Solicitação de {solicitacao.nome_completo} ({solicitacao.email}) rejeitada.",
+                    request=request,
+                )
+                messages.success(request, "Solicitação rejeitada.")
+        return redirect("solicitacoes_acesso")
+
+    pendentes = SolicitacaoAcesso.objects.filter(status=SolicitacaoAcesso.Status.PENDENTE)
+    historico = SolicitacaoAcesso.objects.exclude(status=SolicitacaoAcesso.Status.PENDENTE)[:20]
+    return render(
+        request,
+        "core/solicitacoes_acesso.html",
+        {"pendentes": pendentes, "historico": historico},
+    )
 
 
 def _perfil(request):
@@ -532,8 +626,6 @@ def quantitativo(request):
 
 
 MODULOS = {
-    "transferencias": ("Transferências", "Transferências entre unidades com rastreabilidade."),
-    "importacoes": ("Importações", "Mapeamento, prévia, validação e conciliação de arquivos."),
     "auditoria": ("Usuários, Permissões e Auditoria", "Perfis, acessos e trilha de auditoria."),
 }
 
@@ -544,6 +636,96 @@ def modulo_planejado(request, slug):
     contexto = _contexto(request, titulo)
     contexto["descricao_modulo"] = descricao
     return render(request, "core/modulo_planejado.html", contexto)
+
+
+@login_required
+def importacoes(request):
+    contexto = _contexto(request, "Importação de Planilhas")
+    clinica, perfil = contexto["clinica"], contexto["perfil"]
+    if not clinica:
+        return render(request, "core/importacoes.html", contexto)
+    pode_editar = _pode_editar(
+        perfil, {PerfilUsuario.Papel.ADMINISTRADOR, PerfilUsuario.Papel.FARMACEUTICO}
+    )
+
+    form = ImportacaoArquivoForm(request.POST or None, request.FILES or None)
+    if request.method == "POST" and pode_editar:
+        if "enviar_arquivo" in request.POST and form.is_valid():
+            import tempfile
+
+            arquivo = request.FILES["arquivo"]
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as temporario:
+                temporario.write(arquivo.read())
+                caminho = temporario.name
+            request.session["importacao_caminho"] = caminho
+            request.session["importacao_nome"] = arquivo.name
+            messages.success(request, "Arquivo recebido. Defina a aba e o mapeamento das colunas.")
+            return redirect("importacao_preparar")
+
+    historico = clinica.importacoes.select_related("usuario")[:20]
+    contexto.update(form=form, historico=historico, pode_editar=pode_editar)
+    return render(request, "core/importacoes.html", contexto)
+
+
+@login_required
+def importacao_preparar(request):
+    contexto = _contexto(request, "Preparar Importação")
+    clinica, perfil = contexto["clinica"], contexto["perfil"]
+    if not clinica:
+        return render(request, "core/importacoes.html", contexto)
+    pode_editar = _pode_editar(
+        perfil, {PerfilUsuario.Papel.ADMINISTRADOR, PerfilUsuario.Papel.FARMACEUTICO}
+    )
+    if not pode_editar:
+        return HttpResponse("Perfil sem permissão para importar.", status=403)
+
+    caminho = request.session.get("importacao_caminho")
+    if not caminho or not os.path.exists(caminho):
+        messages.error(request, "Nenhum arquivo em preparação. Envie novamente.")
+        return redirect("importacoes")
+
+    if request.method == "POST" and "confirmar_importacao" in request.POST:
+        nome_aba = request.POST.get("aba", "")
+        mapeamento = {}
+        for campo in ["nome", "principio_ativo", "descricao", "concentracao", "quantidade_mg"]:
+            indice = request.POST.get(f"map_{campo}", "")
+            if indice:
+                try:
+                    mapeamento[campo] = int(indice)
+                except ValueError:
+                    continue
+        if not mapeamento.get("nome") is not None and "nome" not in mapeamento:
+            messages.error(request, "Mapeie ao menos o campo 'Nome do medicamento'.")
+            return redirect("importacao_preparar")
+        campos_faltando = [campo for campo in ("nome", "descricao", "quantidade_mg") if campo not in mapeamento]
+        if campos_faltando:
+            messages.error(
+                request,
+                f"Mapeie os campos obrigatórios: {', '.join(campos_faltando)}.",
+            )
+            return redirect("importacao_preparar")
+        importadas, com_erro, erros, novas = importar_medicamentos(
+            clinica, caminho, nome_aba, mapeamento, usuario=request.user
+        )
+        registrar_auditoria(
+            clinica,
+            request.user,
+            "Importação de planilha",
+            f"{importadas} linha(s) importada(s), {com_erro} com erro ({os.path.basename(caminho)}, aba '{nome_aba}').",
+            request=request,
+        )
+        messages.success(request, f"Importação concluída: {importadas} linha(s) importada(s), {com_erro} com erro.")
+        contexto.update(resultado_importacao={"importadas": importadas, "com_erro": com_erro, "erros": erros[:50]})
+        return render(request, "core/importacao_preparar.html", contexto)
+
+    try:
+        abas = inspecionar_importacao(caminho)
+    except Exception as exc:
+        messages.error(request, f"Não foi possível ler o arquivo: {exc}.")
+        return redirect("importacoes")
+
+    contexto.update(abas=abas, nome_arquivo=request.session.get("importacao_nome", ""))
+    return render(request, "core/importacao_preparar.html", contexto)
 
 
 @login_required
@@ -867,6 +1049,267 @@ def detalhe_pedido(request, pk):
         pode_aprovar=pode_aprovar,
     )
     return render(request, "core/detalhe_pedido.html", contexto)
+
+
+@login_required
+def transferencias(request):
+    contexto = _contexto(request, "Transferências entre Unidades")
+    clinica, perfil = contexto["clinica"], contexto["perfil"]
+    if not clinica:
+        return render(request, "core/transferencias.html", contexto)
+
+    pode_editar = _pode_editar(
+        perfil, {PerfilUsuario.Papel.ADMINISTRADOR, PerfilUsuario.Papel.FARMACEUTICO}
+    )
+
+    if request.method == "POST" and pode_editar:
+        if "criar_transferencia" in request.POST:
+            destino_id = request.POST.get("clinica_destino")
+            destino = Clinica.objects.filter(pk=destino_id, ativa=True).exclude(pk=clinica.pk).first()
+            erros = []
+            itens = []
+            if not destino:
+                erros.append("Selecione uma clínica de destino válida.")
+            apresentacoes = Apresentacao.objects.filter(
+                medicamento__clinica=clinica, ativa=True
+            ).select_related("medicamento")
+            for apresentacao in apresentacoes:
+                chave = f"qtd_{apresentacao.pk}"
+                valor = request.POST.get(chave, "").strip()
+                if not valor:
+                    continue
+                try:
+                    quantidade = int(valor)
+                except ValueError:
+                    continue
+                if quantidade <= 0:
+                    continue
+                disponivel = calcular_estoque_disponivel_apresentacao(clinica, apresentacao)
+                if quantidade > disponivel:
+                    erros.append(
+                        f"{apresentacao}: quantidade ({quantidade}) maior que o disponível ({disponivel})."
+                    )
+                    continue
+                itens.append((apresentacao, quantidade))
+            if erros:
+                for erro in erros:
+                    messages.error(request, erro)
+                return redirect("transferencias")
+            if not itens:
+                messages.error(request, "Informe ao menos um item com quantidade válida.")
+                return redirect("transferencias")
+            with transaction.atomic():
+                transferencia = Transferencia.objects.create(
+                    clinica_origem=clinica,
+                    clinica_destino=destino,
+                    criado_por=request.user,
+                    observacao=request.POST.get("observacao", ""),
+                )
+                transferencia.numero = transferencia.gerar_numero()
+                transferencia.save(update_fields=["numero"])
+                for apresentacao, quantidade in itens:
+                    ItemTransferencia.objects.create(
+                        transferencia=transferencia,
+                        apresentacao=apresentacao,
+                        quantidade=quantidade,
+                    )
+                registrar_auditoria(
+                    clinica,
+                    request.user,
+                    "Criação de transferência",
+                    f"Transferência {transferencia.numero} criada para {destino.nome} com {len(itens)} item(ns).",
+                    request=request,
+                )
+            messages.success(request, f"Transferência {transferencia.numero} criada em rascunho.")
+            return redirect("detalhe_transferencia", pk=transferencia.pk)
+
+    transferencias = (
+        clinica.transferencias_enviadas.select_related("clinica_destino", "criado_por")
+        .prefetch_related("itens__apresentacao__medicamento")[:20]
+    )
+    recebidas = (
+        clinica.transferencias_recebidas.select_related("clinica_origem")
+        .prefetch_related("itens__apresentacao__medicamento")[:20]
+    )
+    clinicas_destino = Clinica.objects.filter(ativa=True).exclude(pk=clinica.pk).order_by("nome")
+    apresentacoes = Apresentacao.objects.filter(
+        medicamento__clinica=clinica, ativa=True
+    ).select_related("medicamento")
+    linhas_apresentacoes = []
+    for apresentacao in apresentacoes:
+        apresentacao.disponivel = calcular_estoque_disponivel_apresentacao(clinica, apresentacao)
+        if apresentacao.disponivel > 0:
+            linhas_apresentacoes.append(apresentacao)
+    contexto.update(
+        transferencias=transferencias,
+        recebidas=recebidas,
+        clinicas_destino=clinicas_destino,
+        apresentacoes=linhas_apresentacoes,
+        pode_editar=pode_editar,
+    )
+    return render(request, "core/transferencias.html", contexto)
+
+
+@login_required
+def detalhe_transferencia(request, pk):
+    contexto = _contexto(request, "Detalhe da Transferência")
+    clinica, perfil = contexto["clinica"], contexto["perfil"]
+    if not clinica:
+        return HttpResponse("Clínica não encontrada.", status=404)
+
+    transferencia = (
+        Transferencia.objects.filter(pk=pk)
+        .select_related("clinica_origem", "clinica_destino", "criado_por", "recebido_por")
+        .first()
+    )
+    if not transferencia or clinica not in [
+        transferencia.clinica_origem, transferencia.clinica_destino,
+    ]:
+        return HttpResponse("Transferência não encontrada.", status=404)
+
+    pode_editar = _pode_editar(
+        perfil, {PerfilUsuario.Papel.ADMINISTRADOR, PerfilUsuario.Papel.FARMACEUTICO}
+    )
+
+    if request.method == "POST":
+        acao = request.POST.get("acao")
+        if acao == "enviar" and pode_editar and transferencia.clinica_origem == clinica:
+            if transferencia.status != Transferencia.Status.RASCUNHO:
+                messages.error(request, "Somente rascunhos podem ser enviados.")
+                return redirect("detalhe_transferencia", pk=transferencia.pk)
+            falhas = []
+            with transaction.atomic():
+                for item in transferencia.itens.select_related("apresentacao"):
+                    ok, _ = processar_saida_lotes(
+                        clinica,
+                        item.apresentacao,
+                        item.quantidade,
+                        usuario=request.user,
+                        observacao=f"Transferência {transferencia.numero} para {transferencia.clinica_destino.nome}",
+                    )
+                    if not ok:
+                        falhas.append(item.apresentacao)
+                if falhas:
+                    transaction.set_rollback(True)
+                    for apresentacao in falhas:
+                        messages.error(
+                            request, f"Estoque insuficiente para {apresentacao}. Transferência não enviada."
+                        )
+                    return redirect("detalhe_transferencia", pk=transferencia.pk)
+                transferencia.status = Transferencia.Status.EM_TRANSITO
+                transferencia.save(update_fields=["status"])
+                registrar_auditoria(
+                    clinica,
+                    request.user,
+                    "Envio de transferência",
+                    f"Transferência {transferencia.numero} enviada para {transferencia.clinica_destino.nome}.",
+                    request=request,
+                )
+            messages.success(request, "Transferência enviada. Estoque baixado na origem.")
+            return redirect("detalhe_transferencia", pk=transferencia.pk)
+
+        if acao == "cancelar" and pode_editar and transferencia.clinica_origem == clinica:
+            if transferencia.status not in [
+                Transferencia.Status.RASCUNHO, Transferencia.Status.EM_TRANSITO,
+            ]:
+                messages.error(request, "Transferência não pode ser cancelada.")
+                return redirect("detalhe_transferencia", pk=transferencia.pk)
+            transferencia.status = Transferencia.Status.CANCELADA
+            transferencia.save(update_fields=["status"])
+            registrar_auditoria(
+                clinica,
+                request.user,
+                "Cancelamento de transferência",
+                f"Transferência {transferencia.numero} cancelada.",
+                request=request,
+            )
+            messages.success(request, "Transferência cancelada.")
+            return redirect("detalhe_transferencia", pk=transferencia.pk)
+
+        if acao == "receber" and pode_editar and transferencia.clinica_destino == clinica:
+            if transferencia.status != Transferencia.Status.EM_TRANSITO:
+                messages.error(request, "Somente transferências em trânsito podem ser recebidas.")
+                return redirect("detalhe_transferencia", pk=transferencia.pk)
+            erros = []
+            with transaction.atomic():
+                for item in transferencia.itens.select_related("apresentacao"):
+                    qtd_recebida = request.POST.get(f"recebido_{item.pk}")
+                    numero_lote = request.POST.get(f"lote_{item.pk}", "").strip()
+                    validade = request.POST.get(f"validade_{item.pk}", "").strip()
+                    try:
+                        qtd_recebida = int(qtd_recebida) if qtd_recebida else 0
+                    except ValueError:
+                        qtd_recebida = 0
+                    if qtd_recebida <= 0:
+                        continue
+                    if not numero_lote or not validade:
+                        erros.append(f"{item.apresentacao}: informe lote e validade.")
+                        continue
+                    try:
+                        data_validade = date.fromisoformat(validade)
+                    except ValueError:
+                        erros.append(f"{item.apresentacao}: validade inválida.")
+                        continue
+                    if qtd_recebida > item.restante:
+                        erros.append(
+                            f"{item.apresentacao}: recebido ({qtd_recebida}) maior que o pendente ({item.restante})."
+                        )
+                        continue
+                    lote, criado = Lote.objects.get_or_create(
+                        clinica=clinica,
+                        apresentacao=item.apresentacao,
+                        numero_lote=numero_lote,
+                        defaults={
+                            "data_validade": data_validade,
+                            "quantidade_inicial": qtd_recebida,
+                            "quantidade_atual": qtd_recebida,
+                        },
+                    )
+                    lote.data_validade = data_validade
+                    if criado:
+                        lote.save(update_fields=["data_validade"])
+                    else:
+                        lote.quantidade_atual += qtd_recebida
+                        lote.save(update_fields=["quantidade_atual", "data_validade"])
+                    MovimentacaoEstoque.objects.create(
+                        clinica=clinica,
+                        lote=lote,
+                        tipo=MovimentacaoEstoque.TipoMovimentacao.ENTRADA,
+                        quantidade=qtd_recebida,
+                        usuario=request.user,
+                        observacao=f"Recebimento da transferência {transferencia.numero} (origem: {transferencia.clinica_origem.nome})",
+                    )
+                    item.quantidade_recebida += qtd_recebida
+                    item.save(update_fields=["quantidade_recebida"])
+                if erros:
+                    transaction.set_rollback(True)
+                    for erro in erros:
+                        messages.error(request, erro)
+                    return redirect("detalhe_transferencia", pk=transferencia.pk)
+                if not transferencia.itens.filter(quantidade_recebida__lt=F("quantidade")).exists():
+                    transferencia.status = Transferencia.Status.RECEBIDA
+                    transferencia.recebido_por = request.user
+                    transferencia.data_recebimento = timezone.now()
+                    transferencia.save(update_fields=["status", "recebido_por", "data_recebimento"])
+                registrar_auditoria(
+                    clinica,
+                    request.user,
+                    "Recebimento de transferência",
+                    f"Recebimento registrado para a transferência {transferencia.numero}.",
+                    request=request,
+                )
+            messages.success(request, "Recebimento registrado. Lotes criados no estoque de destino.")
+            return redirect("detalhe_transferencia", pk=transferencia.pk)
+
+    itens = transferencia.itens.select_related("apresentacao__medicamento")
+    contexto.update(
+        transferencia=transferencia,
+        itens=itens,
+        pode_editar=pode_editar,
+        e_origem=transferencia.clinica_origem == clinica,
+        e_destino=transferencia.clinica_destino == clinica,
+    )
+    return render(request, "core/detalhe_transferencia.html", contexto)
 
 
 @login_required

@@ -2,5 +2,12 @@
 <!doctype html>
 <html lang="pt-BR">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Solicitar acesso — Oncologia Cacoal</title><link rel="stylesheet" href="{% static 'core/app.css' %}"></head>
-<body class="login-body"><main class="single-card"><div class="login-logo small"><img src="{% static 'logo_unimed_extraida.png' %}" alt="Unimed Centro Rondônia"></div><h1>Solicitar acesso</h1><p>Para proteger os dados, a criação de contas e a recuperação de acesso devem ser realizadas pelo administrador responsável da clínica.</p><p>Nenhuma senha é enviada ou armazenada nesta página.</p><a class="button primary" href="{% url 'login' %}">Voltar para entrar</a></main></body>
+<body class="login-body"><main class="single-card">
+<div class="login-logo small"><img src="{% static 'logo_unimed_extraida.png' %}" alt="Unimed Centro Rondônia"></div>
+<h1>Solicitar acesso</h1>
+<p>Preencha os dados abaixo. Um administrador analisará a solicitação e criará seu acesso com senha temporária.</p>
+{% for message in messages %}<div class="notice {{ message.tags }}">{{ message }}</div>{% endfor %}
+<form method="post" class="form-grid">{% csrf_token %}{{ form.as_p }}<button class="button primary" type="submit">Enviar solicitação</button></form>
+<p><a href="{% url 'login' %}">Voltar para entrar</a></p>
+</main></body>
 </html>

@@ -37,6 +37,16 @@
 
   <section class="card table-card">
     <h2>Trilha de Auditoria</h2>
+    <p>
+      {% if auditoria_valida %}
+        <span class="badge success" style="background:#dcfce7; color:#166534; padding:2px 8px; border-radius:4px; font-weight:600;">Cadeia de integridade válida</span>
+      {% else %}
+        <span class="badge danger" style="background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:4px; font-weight:600;">
+          Alerta: {{ auditoria_quebrados }} registro(s) divergente(s) na cadeia de hashes — acione o administrador.
+        </span>
+      {% endif %}
+      <small style="color:#667085;">Cada registro é assinado com SHA-256 encadeado; o log é somente leitura.</small>
+    </p>
     <div class="table-wrap">
       <table>
         <thead>
@@ -45,6 +55,7 @@
             <th>Usuário</th>
             <th>Ação</th>
             <th>Detalhes</th>
+            <th>Hash</th>
           </tr>
         </thead>
         <tbody>
@@ -54,9 +65,10 @@
             <td><strong>{{ r.usuario.username|default:"Sistema" }}</strong></td>
             <td>{{ r.acao }}</td>
             <td>{{ r.detalhes|default:"—" }}</td>
+            <td><code style="font-size:11px;">{{ r.hash_registro|default:"—"|truncatechars:16 }}</code></td>
           </tr>
           {% empty %}
-          <tr><td colspan="4" class="empty">Nenhum registro de auditoria.</td></tr>
+          <tr><td colspan="5" class="empty">Nenhum registro de auditoria.</td></tr>
           {% endfor %}
         </tbody>
       </table>

@@ -325,6 +325,14 @@ class MovimentacaoEstoque(models.Model):
 
 
 class RegistroAuditoria(models.Model):
+    """Trilha de auditoria com cadeia de hashes (append-only).
+
+    Cada registro carrega o SHA-256 do conteúdo anterior (``hash_anterior``)
+    e o da própria linha (``hash_registro``). Tentativas de alterar ou excluir
+    registros existentes são bloqueadas no modelo e no admin; a integridade da
+    cadeia pode ser verificada por ``verificar_integridade``.
+    """
+
     clinica = models.ForeignKey(Clinica, on_delete=models.CASCADE, related_name="auditorias")
     usuario = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
@@ -333,12 +341,111 @@ class RegistroAuditoria(models.Model):
     detalhes = models.TextField(blank=True)
     ip_origem = models.GenericIPAddressField(null=True, blank=True)
     data_hora = models.DateTimeField(auto_now_add=True)
+    hash_anterior = models.CharField(max_length=64, blank=True, editable=False)
+    hash_registro = models.CharField(max_length=64, blank=True, editable=False)
 
     class Meta:
         ordering = ["-data_hora"]
 
     def __str__(self):
         return f"[{self.data_hora:%d/%m/%Y %H:%M}] {self.usuario} — {self.acao}"
+
+    @classmethod
+    def _conteudo_a_hash(cls, anterior, clinica, usuario, acao, detalhes, ip, data_hora):
+        """Payload canônico do hash: conteúdo + posição da cadeia."""
+        return "|".join(
+            str(v) if v is not None else ""
+            for v in (
+                anterior,
+                clinica.pk if hasattr(clinica, "pk") else clinica,
+                usuario.pk if usuario is not None else "",
+                acao,
+                detalhes,
+                ip,
+                data_hora.isoformat(),
+            )
+        )
+
+    @classmethod
+    def calcular_hash(cls, anterior, clinica, usuario, acao, detalhes, ip, data_hora):
+        import hashlib
+
+        return hashlib.sha256(
+            cls._conteudo_a_hash(
+                anterior, clinica, usuario, acao, detalhes, ip, data_hora
+            ).encode("utf-8")
+        ).hexdigest()
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            from django.core.exceptions import PermissionDenied
+
+            raise PermissionDenied(
+                "Registros de auditoria são append-only e não podem ser alterados."
+            )
+        super().save(*args, **kwargs)
+        if not self.hash_registro:
+            from django.utils import timezone as _tz
+
+            anterior = (
+                self.__class__.objects.filter(clinica=self.clinica)
+                .order_by("-data_hora", "-pk")
+                .exclude(pk=self.pk)
+                .values_list("hash_registro", flat=True)
+                .first()
+                or ""
+            )
+            data_hora = self.data_hora or _tz.now()
+            self.hash_registro = self.calcular_hash(
+                anterior,
+                self.clinica,
+                self.usuario,
+                self.acao,
+                self.detalhes,
+                self.ip_origem,
+                data_hora,
+            )
+            self.hash_anterior = anterior
+            self.__class__.objects.filter(pk=self.pk).update(
+                hash_registro=self.hash_registro, hash_anterior=self.hash_anterior
+            )
+
+    def delete(self, *args, **kwargs):
+        from django.core.exceptions import PermissionDenied
+
+        raise PermissionDenied(
+            "Registros de auditoria são append-only e não podem ser excluídos."
+        )
+
+    @classmethod
+    def verificar_integridade(cls, clinica):
+        """Valida a cadeia de hashes da clínica.
+
+        Retorna (valida: bool, registros_quebrados: list[RegistroAuditoria]).
+        """
+        registros = list(
+            cls.objects.filter(clinica=clinica).order_by("data_hora", "pk")
+        )
+        quebrados = []
+        hash_esperado = ""
+        for registro in registros:
+            esperado = cls.calcular_hash(
+                hash_esperado,
+                registro.clinica,
+                registro.usuario,
+                registro.acao,
+                registro.detalhes,
+                registro.ip_origem,
+                registro.data_hora,
+            )
+            ok = (
+                registro.hash_anterior == hash_esperado
+                and registro.hash_registro == esperado
+            )
+            if not ok:
+                quebrados.append(registro)
+            hash_esperado = registro.hash_registro or esperado
+        return (not quebrados, quebrados)
 
 
 class PedidoCompra(models.Model):

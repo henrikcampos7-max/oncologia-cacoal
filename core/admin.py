@@ -97,9 +97,30 @@ class MovimentacaoEstoqueAdmin(admin.ModelAdmin):
 
 @admin.register(RegistroAuditoria)
 class RegistroAuditoriaAdmin(admin.ModelAdmin):
-    list_display = ("data_hora", "usuario", "acao", "clinica")
+    """Trilha de auditoria somente leitura (append-only, cadeia de hashes)."""
+
+    list_display = ("data_hora", "usuario", "acao", "clinica", "hash_registro")
     list_filter = ("clinica", "acao")
     search_fields = ("usuario__username", "acao", "detalhes")
+    readonly_fields = (
+        "clinica",
+        "usuario",
+        "acao",
+        "detalhes",
+        "ip_origem",
+        "data_hora",
+        "hash_anterior",
+        "hash_registro",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 class ItemPedidoCompraInline(admin.TabularInline):

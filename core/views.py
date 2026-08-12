@@ -1635,8 +1635,14 @@ def auditoria(request):
 
     registros = clinica.auditorias.select_related("usuario").order_by("-data_hora")[:50]
     perfis = clinica.perfis.select_related("usuario").order_by("usuario__username")
+    auditoria_valida, quebrados = RegistroAuditoria.verificar_integridade(clinica)
 
-    contexto.update(registros=registros, perfis=perfis)
+    contexto.update(
+        registros=registros,
+        perfis=perfis,
+        auditoria_valida=auditoria_valida,
+        auditoria_quebrados=len(quebrados),
+    )
     return render(request, "core/auditoria.html", contexto)
 
 

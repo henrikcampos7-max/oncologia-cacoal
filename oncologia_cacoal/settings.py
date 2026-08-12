@@ -135,12 +135,29 @@ TRANSFER_CONFERENCE_CONFIG = {
         "revisao_obrigatoria": 0.0,
     },
     # Provider de extração visual. "mock" (determinístico, para testes/manual)
-    # é o padrão; "manual" exige entrada humana; providers externos plugam aqui.
+    # é o padrão; "manual" exige entrada humana; "azure" e "google" são OCR
+    # reais via HTTP (Document Intelligence / Cloud Vision). Configuração
+    # somente por variável de ambiente — nenhuma chave deve ser versionada.
     "vision_provider": os.getenv("TRANSFER_VISION_PROVIDER", "mock"),
     "vision_timeout_segundos": int(os.getenv("TRANSFER_VISION_TIMEOUT", "60")),
     "tamanho_maximo_evidencia_mb": 10,
     "imagens_permitidas": ("png", "jpg", "jpeg", "webp"),
     "validade_critica_dias": 30,
+    # Azure AI Document Intelligence (prebuilt-layout).
+    "azure": {
+        "endpoint": os.getenv("TRANSFER_AZURE_ENDPOINT", ""),
+        "chave": os.getenv("TRANSFER_AZURE_KEY", ""),
+        "api_version": os.getenv("TRANSFER_AZURE_API_VERSION", "2024-11-30"),
+        "modelo": os.getenv("TRANSFER_AZURE_MODEL", "prebuilt-layout"),
+    },
+    # Google Cloud Vision (TEXT_DETECTION) — autenticação por token OAuth 2.0
+    # obtido fora do app (ex.: gcloud auth application-default print-access-token).
+    "google": {
+        "token": os.getenv("TRANSFER_GOOGLE_TOKEN", ""),
+        "api_endpoint": os.getenv(
+            "TRANSFER_GOOGLE_API_ENDPOINT", "https://vision.googleapis.com/v1/images:annotate"
+        ),
+    },
 }
 
 EMAIL_BACKEND = os.getenv(

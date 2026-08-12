@@ -2,7 +2,7 @@ from datetime import date
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from core.models import (
     Apresentacao,
@@ -14,9 +14,12 @@ from core.models import (
     TransferenciaEvidencia,
 )
 from core.vision import (
+    AzureDocumentIntelligenceProvider,
+    GoogleVisionProvider,
     ManualProvider,
     MockProvider,
     ProviderFactory,
+    _parsear_ocr,
     processar_evidencia,
     registrar_extracao,
     resumo_aprovacao,
@@ -67,8 +70,206 @@ class ProvidersTests(TestCase):
     def test_factory_seleciona_por_env(self):
         self.assertIsInstance(ProviderFactory.obter_provider("mock"), MockProvider)
         self.assertIsInstance(ProviderFactory.obter_provider("manual"), ManualProvider)
+        self.assertIsInstance(
+            ProviderFactory.obter_provider("azure"), AzureDocumentIntelligenceProvider
+        )
+        self.assertIsInstance(
+            ProviderFactory.obter_provider("google"), GoogleVisionProvider
+        )
         with self.assertRaises(ValueError):
             ProviderFactory.obter_provider("inexistente")
+
+
+class FakeProxy:
+    """Proxy determinístico: devolve respostas pré-programadas sem rede."""
+
+    def __init__(self, respostas):
+        self.respostas = list(respostas)
+        self.chamadas = []
+
+    def abrir(self, request):
+        self.chamadas.append(request.full_url)
+        return _FakeResponse(self.respostas.pop(0))
+
+    def ler_json(self, response):
+        return response.corpo
+
+
+class _FakeResponse:
+    def __init__(self, corpo):
+        self.corpo = corpo
+        self.headers = corpo.pop("headers", {}) if isinstance(corpo, dict) else {}
+
+    def read(self):
+        import json
+
+        return json.dumps(self.corpo).encode("utf-8")
+
+    def close(self):
+        pass
+
+
+AZURE_CONFIG = {
+    "azure": {
+        "endpoint": "https://fake.cognitiveservices.azure.com/",
+        "chave": "CHAVE-FAKE",
+        "api_version": "2024-11-30",
+        "modelo": "prebuilt-layout",
+    }
+}
+
+
+class AzureProviderTests(TestCase):
+    def test_extrai_campos_do_texto_ocr(self):
+        proxy = FakeProxy(
+            [
+                {"headers": {"operation-location": "https://fake/operations/1"}},
+                {
+                    "status": "succeeded",
+                    "content": (
+                        "PRODUTO: DIFENIDRIN 50 MG/ML\n"
+                        "LOTE: M50034585\n"
+                        "VAL: 30/11/2028\n"
+                        "QTD: 24"
+                    ),
+                },
+            ]
+        )
+        with override_settings(TRANSFER_CONFERENCE_CONFIG={**AZURE_CONFIG}):
+            provider = AzureDocumentIntelligenceProvider(proxy=proxy)
+            campos = provider.extract_image(b"imagem-fake")
+        self.assertEqual(campos["nome_produto"], "DIFENIDRIN 50 MG/ML")
+        self.assertEqual(campos["lote"], "M50034585")
+        self.assertEqual(campos["validade"], "2028-11-30")
+        self.assertEqual(campos["quantidade"], 24)
+        self.assertFalse(campos["requer_revisao"])
+        self.assertEqual(campos["confianca_lote"], 1)
+        self.assertEqual(len(proxy.chamadas), 2)
+
+    def test_sem_lote_validade_nao_inventa(self):
+        proxy = FakeProxy(
+            [
+                {"headers": {"operation-location": "https://fake/operations/1"}},
+                {"status": "succeeded", "content": "PRODUTO: SEM INFO"},
+            ]
+        )
+        with override_settings(TRANSFER_CONFERENCE_CONFIG={**AZURE_CONFIG}):
+            campos = AzureDocumentIntelligenceProvider(proxy=proxy).extract_image(b"x")
+        self.assertEqual(campos["lote"], "")
+        self.assertIsNone(campos["validade"])
+        self.assertTrue(campos["requer_revisao"])
+
+    def test_falha_http_levanta_runtimeerror(self):
+        import urllib.error as urlerror
+
+        class ProxyErro:
+            def abrir(self, request):
+                raise urlerror.HTTPError(
+                    "url", 401, "Unauthorized", None, None
+                )
+
+            def ler_json(self, response):
+                raise AssertionError("não deve ler")
+
+        with override_settings(TRANSFER_CONFERENCE_CONFIG={**AZURE_CONFIG}):
+            provider = AzureDocumentIntelligenceProvider(proxy=ProxyErro())
+            with self.assertRaises(RuntimeError) as ctx:
+                provider.extract_image(b"x")
+        self.assertIn("401", str(ctx.exception))
+
+    def test_sem_configuracao_orienta_erro(self):
+        with override_settings(
+            TRANSFER_CONFERENCE_CONFIG={"azure": {"endpoint": "", "chave": ""}}
+        ):
+            provider = AzureDocumentIntelligenceProvider(proxy=FakeProxy([]))
+            with self.assertRaises(RuntimeError) as ctx:
+                provider.extract_image(b"x")
+        self.assertIn("TRANSFER_AZURE_ENDPOINT", str(ctx.exception))
+
+
+class GoogleProviderTests(TestCase):
+    def test_extrai_campos_do_texto_ocr(self):
+        proxy = FakeProxy(
+            [
+                {
+                    "responses": [
+                        {
+                            "textAnnotations": [
+                                {
+                                    "description": (
+                                        "PRODUTO: RITUXIMABE 500 MG\n"
+                                        "LOTE: RIT-2026\n"
+                                        "VAL: 03/2029\n"
+                                        "QTDE: 4"
+                                    )
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        )
+        cfg = {
+            "google": {"token": "TOKEN-FAKE", "api_endpoint": "https://fake/annotate"}
+        }
+        with override_settings(TRANSFER_CONFERENCE_CONFIG=cfg):
+            campos = GoogleVisionProvider(proxy=proxy).extract_image(b"imagem-fake")
+        self.assertEqual(campos["nome_produto"], "RITUXIMABE 500 MG")
+        self.assertEqual(campos["lote"], "RIT-2026")
+        self.assertEqual(campos["validade"], "2029-03-01")
+        self.assertEqual(campos["quantidade"], 4)
+        self.assertFalse(campos["requer_revisao"])
+        self.assertEqual(len(proxy.chamadas), 1)
+
+    def test_resposta_com_erro_do_google(self):
+        proxy = FakeProxy(
+            [
+                {
+                    "responses": [
+                        {
+                            "error": {
+                                "code": 400,
+                                "message": "Image is not valid",
+                            }
+                        }
+                    ]
+                }
+            ]
+        )
+        cfg = {
+            "google": {"token": "TOKEN-FAKE", "api_endpoint": "https://fake/annotate"}
+        }
+        with override_settings(TRANSFER_CONFERENCE_CONFIG=cfg):
+            with self.assertRaises(RuntimeError) as ctx:
+                GoogleVisionProvider(proxy=proxy).extract_image(b"x")
+        self.assertIn("Image is not valid", str(ctx.exception))
+
+    def test_sem_token_orienta_erro(self):
+        with override_settings(
+            TRANSFER_CONFERENCE_CONFIG={"google": {"token": "", "api_endpoint": ""}}
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                GoogleVisionProvider(proxy=FakeProxy([])).extract_image(b"x")
+        self.assertIn("TRANSFER_GOOGLE_TOKEN", str(ctx.exception))
+
+
+class ParsearOcrTests(TestCase):
+    def test_lote_normalizado(self):
+        campos = _parsear_ocr("Lote: 24l0388\nVAL: 30/11/2028")
+        self.assertEqual(campos["lote"], "24L0388")
+        self.assertEqual(campos["validade"], "2028-11-30")
+
+    def test_lote_invalido_rejeitado(self):
+        campos = _parsear_ocr("Lote: !!invalido!!")
+        self.assertEqual(campos["lote"], "")
+
+    def test_validade_so_mes_ano(self):
+        campos = _parsear_ocr("LOTE: X123\nVAL 03/2029")
+        self.assertEqual(campos["validade"], "2029-03-01")
+
+    def test_quantidade_somente_rotulada(self):
+        self.assertEqual(_parsear_ocr("24 caixas")["quantidade"], None)
+        self.assertEqual(_parsear_ocr("QTD: 24")["quantidade"], 24)
 
 
 class ResumoAprovacaoTests(TestCase):

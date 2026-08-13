@@ -1,6 +1,7 @@
 {% extends 'core/base.html' %}
 {% block content %}
 <div style="display: flex; flex-direction: column; gap: 20px;">
+  <section class="card"><form method="get" class="form-grid audit-filters"><p><label for="id_dias_auditoria">Período</label><select id="id_dias_auditoria" name="dias"><option value="7" {% if dias_filtro == 7 %}selected{% endif %}>7 dias</option><option value="30" {% if dias_filtro == 30 %}selected{% endif %}>30 dias</option><option value="90" {% if dias_filtro == 90 %}selected{% endif %}>90 dias</option><option value="365" {% if dias_filtro == 365 %}selected{% endif %}>1 ano</option></select></p><p><label for="id_acao_auditoria">Ação</label><select id="id_acao_auditoria" name="acao"><option value="">Todas</option>{% for item in acoes %}<option value="{{ item }}" {% if acao_filtro == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></p><p><label for="id_busca_auditoria">Registro, usuário ou ação</label><input id="id_busca_auditoria" name="busca" value="{{ busca }}" placeholder="Buscar"></p><div class="actions"><button class="button primary">Filtrar</button><a class="button secondary" href="{% url 'auditoria' %}">Limpar</a><a class="button secondary" href="{% url 'auditoria_csv' %}">Exportar trilha</a></div></form></section>
   <section class="card table-card">
     <h2>Usuários e Perfis da Clínica</h2>
     <div class="table-wrap">

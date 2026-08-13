@@ -5,7 +5,9 @@ from django.contrib.auth.forms import AuthenticationForm
 from .models import (
     Apresentacao,
     Clinica,
+    ConfiguracaoClinica,
     Lote,
+    MedicacaoOral,
     Medicamento,
     Paciente,
     PerfilUsuario,
@@ -126,6 +128,72 @@ class SessaoTratamentoForm(forms.ModelForm):
 class PeriodoForm(forms.Form):
     data_inicial = forms.DateField(widget=DateInput())
     data_final = forms.DateField(widget=DateInput())
+
+
+class MedicacaoOralForm(forms.ModelForm):
+    class Meta:
+        model = MedicacaoOral
+        fields = [
+            "paciente",
+            "classe",
+            "medicamento",
+            "data_inicio",
+            "quantidade_ciclos",
+            "intervalo_dias",
+            "renovacao_pedido_meses",
+            "solicitar_guia_antes_dias",
+            "estrategia_aquisicao",
+            "motivo_prioridade",
+            "observacoes",
+        ]
+        widgets = {
+            "data_inicio": DateInput(),
+            "observacoes": forms.Textarea(attrs={"rows": 3}),
+        }
+        labels = {
+            "quantidade_ciclos": "Quantidade de ciclos previstos",
+            "intervalo_dias": "Intervalo entre dispensações (dias)",
+            "renovacao_pedido_meses": "Renovação do pedido médico (meses)",
+            "solicitar_guia_antes_dias": "Solicitar guia antes da entrega (dias)",
+            "estrategia_aquisicao": "Estratégia de aquisição",
+            "motivo_prioridade": "Motivo da prioridade (opcional)",
+        }
+
+    def __init__(self, *args, clinica=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["paciente"].queryset = Paciente.objects.none()
+        self.fields["medicamento"].queryset = Medicamento.objects.none()
+        if clinica:
+            self.fields["paciente"].queryset = clinica.pacientes.filter(ativo=True)
+            self.fields["medicamento"].queryset = clinica.medicamentos.filter(ativo=True)
+
+    def clean(self):
+        cleaned = super().clean()
+        paciente = cleaned.get("paciente")
+        medicamento = cleaned.get("medicamento")
+        if paciente and medicamento and paciente.clinica_id != medicamento.clinica_id:
+            raise forms.ValidationError("Paciente e medicamento devem pertencer à mesma clínica.")
+        return cleaned
+
+
+class ConfiguracaoClinicaForm(forms.ModelForm):
+    class Meta:
+        model = ConfiguracaoClinica
+        fields = [
+            "setor",
+            "periodo_padrao_dias",
+            "densidade_tabela",
+            "alertar_estoque_minimo",
+            "alertar_validade_30_dias",
+            "alertar_validacao_pendente",
+        ]
+        labels = {
+            "periodo_padrao_dias": "Período padrão do painel",
+            "densidade_tabela": "Densidade das tabelas",
+            "alertar_estoque_minimo": "Alertar estoque mínimo",
+            "alertar_validade_30_dias": "Alertar validade em até 30 dias",
+            "alertar_validacao_pendente": "Alertar validação pendente",
+        }
 
 
 class SobraRealForm(forms.ModelForm):

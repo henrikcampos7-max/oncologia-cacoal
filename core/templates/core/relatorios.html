@@ -1,4 +1,5 @@
 {% extends 'core/base.html' %}
+{% block top_actions %}<div class="top-actions"><a class="button secondary" href="{% url 'relatorios_impressao' %}" target="_blank">PDF</a><a class="button secondary" href="{% url 'exportar_resumo_excel' %}">Excel</a></div>{% endblock %}
 {% block content %}
 <div style="display: flex; flex-direction: column; gap: 20px;">
 

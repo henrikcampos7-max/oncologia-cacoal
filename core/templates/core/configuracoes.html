@@ -1,0 +1,16 @@
+{% extends 'core/base.html' %}
+{% block subtitle %}<p>Preferências operacionais; credenciais e segredos não são exibidos.</p>{% endblock %}
+{% block content %}
+<section class="card settings-user"><div class="settings-icon">●</div><div><h2>{{ request.user.get_full_name|default:request.user.username }}</h2><p>{{ perfil.get_papel_display }} · <span class="status">Ativo</span></p></div><div><small>Último acesso</small><strong>{{ ultimo_acesso|date:"d/m/Y H:i"|default:"Não informado" }}</strong></div></section>
+
+<div class="settings-grid">
+  <section class="card"><h2>Dados da clínica</h2><dl class="settings-list"><div><dt>Nome</dt><dd>{{ clinica.nome }}</dd></div><div><dt>Setor</dt><dd>{{ configuracao.setor }}</dd></div></dl></section>
+  <section class="card"><h2>Preferências do painel</h2><dl class="settings-list"><div><dt>Período padrão</dt><dd>{{ configuracao.get_periodo_padrao_dias_display }}</dd></div><div><dt>Densidade</dt><dd>{{ configuracao.get_densidade_tabela_display }}</dd></div></dl></section>
+  <section class="card"><h2>Alertas e notificações</h2><dl class="settings-list"><div><dt>Estoque mínimo</dt><dd>{{ configuracao.alertar_estoque_minimo|yesno:"Ativo,Inativo" }}</dd></div><div><dt>Validade em 30 dias</dt><dd>{{ configuracao.alertar_validade_30_dias|yesno:"Ativo,Inativo" }}</dd></div><div><dt>Validação pendente</dt><dd>{{ configuracao.alertar_validacao_pendente|yesno:"Ativo,Inativo" }}</dd></div></dl></section>
+  <section class="card"><h2>Segurança</h2><dl class="settings-list"><div><dt>Histórico de acessos</dt><dd>Ativo</dd></div><div><dt>Credenciais na interface</dt><dd>Bloqueadas</dd></div></dl><a class="button secondary" href="{% url 'auditoria' %}">Revisar segurança</a></section>
+  <section class="card"><h2>Backup e exportação</h2><p>Use somente os relatórios permitidos e armazene cópias em local protegido.</p><div class="top-actions">{% if pode_editar %}<a class="button primary" href="{% url 'backup_seguro' %}">Gerar cópia sem credenciais</a>{% endif %}<a class="button secondary" href="{% url 'exportar_resumo_excel' %}">Exportar Excel</a><a class="button secondary" href="{% url 'relatorios_impressao' %}" target="_blank">PDF</a></div></section>
+  <section class="card"><h2>Regras operacionais</h2><dl class="settings-list"><div><dt>Controle de validade FEFO</dt><dd>{{ fefo_ativo|yesno:"Ativado,Desativado" }}</dd></div><div><dt>Confirmação manual obrigatória</dt><dd>{{ confirmacao_manual|yesno:"Ativada,Desativada" }}</dd></div></dl></section>
+</div>
+
+{% if pode_editar %}<section class="card"><div class="section-heading"><div><h2>Editar preferências</h2><p>Somente administradores podem salvar. Regras clínicas não são configuradas aqui.</p></div></div><form method="post" class="form-grid settings-form">{% csrf_token %}{{ form.as_p }}<button class="button primary" type="submit">Salvar configurações</button></form></section>{% else %}<div class="notice warning">Somente administradores podem alterar estas preferências.</div>{% endif %}
+{% endblock %}

@@ -40,3 +40,7 @@ As imagens em `docs/referencias-visuais/` são especificações visuais com dado
 ## Ausência de imagem 9
 
 A pasta fornecida não contém `9.png`. A cobertura inclui todas as 13 imagens efetivamente recebidas: acesso, `1.png` a `8.png` (incluindo `3.1.png`) e `10.png` a `12.png`.
+
+## Implementação funcional
+
+As referências foram ligadas às rotas Django reais. O backend existente cobre painel, agenda, pacientes, medicamentos, quantitativo, alertas, estoque, compras, auditoria e relatórios. Esta entrega acrescenta medicações orais, configurações por clínica, filtros reais, exportações e cópia sem credenciais. Imagens permanecem somente como especificação em `docs/referencias-visuais/`.

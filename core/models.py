@@ -193,6 +193,164 @@ class Paciente(models.Model):
         return self.nome
 
 
+class MedicacaoOral(models.Model):
+    """Planejamento manual de dispensações orais, sempre sujeito à revisão farmacêutica."""
+
+    class Classe(models.TextChoices):
+        QUIMIOTERAPIA = "quimioterapia", "Quimioterapia oral"
+        HORMONIOTERAPIA = "hormonioterapia", "Hormonioterápico"
+        SUPORTE = "suporte", "Medicação de suporte"
+        OUTROS = "outros", "Outros"
+
+    class Status(models.TextChoices):
+        PREVISTA = "prevista", "Prevista"
+        AGUARDANDO_DOCUMENTO = "aguardando_documento", "Aguardando documento"
+        PRONTA = "pronta", "Pronta para dispensação"
+        PAUSADA = "pausada", "Pausada"
+        CONCLUIDA = "concluida", "Concluída"
+
+    class EstrategiaAquisicao(models.TextChoices):
+        LISTA_PROGRAMADA = "lista_programada", "Lista programada"
+        COMPRA_POR_GUIA = "compra_por_guia", "Compra individual por guia"
+
+    clinica = models.ForeignKey(
+        Clinica, on_delete=models.PROTECT, related_name="medicacoes_orais"
+    )
+    paciente = models.ForeignKey(
+        Paciente, on_delete=models.PROTECT, related_name="medicacoes_orais"
+    )
+    medicamento = models.ForeignKey(
+        Medicamento, on_delete=models.PROTECT, related_name="agendamentos_orais"
+    )
+    classe = models.CharField(max_length=20, choices=Classe.choices)
+    data_inicio = models.DateField()
+    quantidade_ciclos = models.PositiveSmallIntegerField(
+        default=1, validators=[MinValueValidator(1)]
+    )
+    ciclo_atual = models.PositiveSmallIntegerField(
+        default=1, validators=[MinValueValidator(1)]
+    )
+    intervalo_dias = models.PositiveSmallIntegerField(
+        default=30, validators=[MinValueValidator(1)]
+    )
+    renovacao_pedido_meses = models.PositiveSmallIntegerField(
+        default=6, validators=[MinValueValidator(1)]
+    )
+    solicitar_guia_antes_dias = models.PositiveSmallIntegerField(
+        null=True, blank=True, validators=[MinValueValidator(1)]
+    )
+    estrategia_aquisicao = models.CharField(
+        max_length=20,
+        choices=EstrategiaAquisicao.choices,
+        default=EstrategiaAquisicao.LISTA_PROGRAMADA,
+    )
+    motivo_prioridade = models.CharField(max_length=200, blank=True)
+    status = models.CharField(
+        max_length=24, choices=Status.choices, default=Status.PREVISTA
+    )
+    observacoes = models.CharField(max_length=500, blank=True)
+    revisado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="medicacoes_orais_revisadas",
+    )
+    revisado_em = models.DateTimeField(null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["data_inicio", "paciente__nome"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["clinica", "paciente", "medicamento", "data_inicio"],
+                name="medicacao_oral_sem_duplicidade_exata",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(ciclo_atual__lte=models.F("quantidade_ciclos")),
+                name="medicacao_oral_ciclo_dentro_do_planejado",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.paciente} — {self.medicamento}"
+
+    @property
+    def data_proxima_dispensacao(self):
+        from datetime import timedelta
+
+        return self.data_inicio + timedelta(days=(self.ciclo_atual - 1) * self.intervalo_dias)
+
+    @property
+    def data_solicitacao_guia(self):
+        from datetime import timedelta
+
+        if not self.solicitar_guia_antes_dias:
+            return None
+        return self.data_proxima_dispensacao - timedelta(days=self.solicitar_guia_antes_dias)
+
+    @property
+    def data_renovacao_pedido(self):
+        import calendar
+
+        total_meses = self.data_inicio.month - 1 + self.renovacao_pedido_meses
+        ano = self.data_inicio.year + total_meses // 12
+        mes = total_meses % 12 + 1
+        dia = min(self.data_inicio.day, calendar.monthrange(ano, mes)[1])
+        return self.data_inicio.replace(year=ano, month=mes, day=dia)
+
+    @property
+    def ciclos_previstos(self):
+        from datetime import timedelta
+
+        return [
+            {
+                "numero": numero,
+                "data": self.data_inicio + timedelta(days=(numero - 1) * self.intervalo_dias),
+            }
+            for numero in range(1, self.quantidade_ciclos + 1)
+        ]
+
+
+class ConfiguracaoClinica(models.Model):
+    """Preferências operacionais sem credenciais, segredos ou regras clínicas."""
+
+    class PeriodoPainel(models.IntegerChoices):
+        SETE_DIAS = 7, "Últimos/próximos 7 dias"
+        QUATORZE_DIAS = 14, "14 dias"
+        TRINTA_DIAS = 30, "30 dias"
+
+    class DensidadeTabela(models.TextChoices):
+        PADRAO = "padrao", "Padrão"
+        COMPACTA = "compacta", "Compacta"
+
+    clinica = models.OneToOneField(
+        Clinica, on_delete=models.CASCADE, related_name="configuracao"
+    )
+    setor = models.CharField(max_length=120, default="Centro de Oncologia")
+    periodo_padrao_dias = models.PositiveSmallIntegerField(
+        choices=PeriodoPainel.choices, default=PeriodoPainel.SETE_DIAS
+    )
+    densidade_tabela = models.CharField(
+        max_length=10, choices=DensidadeTabela.choices, default=DensidadeTabela.PADRAO
+    )
+    alertar_estoque_minimo = models.BooleanField(default=True)
+    alertar_validade_30_dias = models.BooleanField(default=True)
+    alertar_validacao_pendente = models.BooleanField(default=True)
+    atualizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="configuracoes_clinica_atualizadas",
+    )
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Configurações — {self.clinica}"
+
+
 class SessaoTratamento(models.Model):
     class Status(models.TextChoices):
         AGENDADA = "agendada", "Agendada"

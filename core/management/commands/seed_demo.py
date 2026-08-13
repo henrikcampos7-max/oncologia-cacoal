@@ -10,8 +10,10 @@ from django.utils import timezone
 from core.models import (
     Apresentacao,
     Clinica,
+    ConfiguracaoClinica,
     ItemProtocolo,
     Lote,
+    MedicacaoOral,
     Medicamento,
     MovimentacaoEstoque,
     Paciente,
@@ -66,6 +68,15 @@ class Command(BaseCommand):
                 "clinica": clinic,
                 "papel": PerfilUsuario.Papel.ADMINISTRADOR,
                 "ativo": True,
+            },
+        )
+        ConfiguracaoClinica.objects.update_or_create(
+            clinica=clinic,
+            defaults={
+                "setor": "Centro de Oncologia Fictício",
+                "periodo_padrao_dias": ConfiguracaoClinica.PeriodoPainel.SETE_DIAS,
+                "densidade_tabela": ConfiguracaoClinica.DensidadeTabela.PADRAO,
+                "atualizado_por": user,
             },
         )
 
@@ -159,6 +170,19 @@ class Command(BaseCommand):
                 "protocolo": protocol,
                 "status": SessaoTratamento.Status.AGENDADA,
                 "observacoes": "Registro fictício para verificação visual local.",
+            },
+        )
+        MedicacaoOral.objects.update_or_create(
+            clinica=clinic,
+            paciente=patient,
+            medicamento=medication,
+            data_inicio=today,
+            defaults={
+                "classe": MedicacaoOral.Classe.OUTROS,
+                "quantidade_ciclos": 3,
+                "intervalo_dias": 30,
+                "status": MedicacaoOral.Status.PREVISTA,
+                "observacoes": "Planejamento oral inteiramente fictício.",
             },
         )
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pacientes e Protocolos"
+  short_description: "Cadastros fictícios, protocolos e integridade de dados"
+  default_prompt: "Use $oncologia-pacientes-protocolos para implementar e validar este módulo da Oncologia Cacoal."

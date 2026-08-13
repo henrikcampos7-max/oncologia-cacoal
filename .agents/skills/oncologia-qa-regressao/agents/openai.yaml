@@ -1,0 +1,4 @@
+interface:
+  display_name: "QA de Regressão Oncológica"
+  short_description: "Testes focados de fluxos críticos e permissões"
+  default_prompt: "Use $oncologia-qa-regressao para revisar este fluxo da Oncologia Cacoal."

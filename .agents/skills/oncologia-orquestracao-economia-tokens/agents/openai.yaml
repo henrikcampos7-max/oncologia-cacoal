@@ -1,0 +1,4 @@
+interface:
+  display_name: "Orquestração Econômica"
+  short_description: "Roteamento modular com leitura e testes seletivos"
+  default_prompt: "Use $oncologia-orquestracao-economia-tokens para revisar este fluxo da Oncologia Cacoal."

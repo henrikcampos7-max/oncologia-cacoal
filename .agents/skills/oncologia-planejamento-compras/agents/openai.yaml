@@ -1,0 +1,4 @@
+interface:
+  display_name: "Planejamento de Compras"
+  short_description: "Sugestões de compra com confirmação manual obrigatória"
+  default_prompt: "Use $oncologia-planejamento-compras para implementar e validar este módulo da Oncologia Cacoal."

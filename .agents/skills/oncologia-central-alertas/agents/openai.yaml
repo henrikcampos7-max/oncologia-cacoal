@@ -1,0 +1,4 @@
+interface:
+  display_name: "Central de Alertas"
+  short_description: "Priorização rastreável sem decisões automáticas"
+  default_prompt: "Use $oncologia-central-alertas para implementar e validar este módulo da Oncologia Cacoal."

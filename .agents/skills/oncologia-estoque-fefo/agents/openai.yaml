@@ -1,0 +1,4 @@
+interface:
+  display_name: "Estoque e FEFO"
+  short_description: "Lotes, reservas, validades e movimentações auditáveis"
+  default_prompt: "Use $oncologia-estoque-fefo para implementar e validar este módulo da Oncologia Cacoal."

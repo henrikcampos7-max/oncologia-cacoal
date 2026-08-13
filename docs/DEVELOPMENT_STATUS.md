@@ -23,6 +23,7 @@ Projeto em desenvolvimento. Base administrativa operacional completa e testada; 
 - [x] Relatórios gerenciais (indicadores, taxas de faltas/cancelamento, consumo mensal, estoque por validade/quantidade, lotes urgentes)
 - [x] Painel inicial (dashboard)
 - [x] Kit de agentes de desenvolvimento em `.github/agents/` (27) + instruções Copilot em `.github/copilot-instructions.md`
+- [x] 13 referências visuais fictícias mapeadas para 15 agentes orquestradores/QA e 18 skills modulares/transversais, com Modo de Economia de Tokens, acessibilidade e barreiras de segurança/LGPD
 
 ## Parcial
 - [ ] Quantitativo/previsão: resumo por período disponível, sem motor de demanda consolidada formal

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Acesso Seguro Oncologia"
+  short_description: "Autenticação, perfis e sessão com menor privilégio"
+  default_prompt: "Use $oncologia-acesso-seguro para implementar e validar este módulo da Oncologia Cacoal."

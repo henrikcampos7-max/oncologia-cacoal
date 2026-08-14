@@ -2,6 +2,7 @@ from decimal import Decimal
 from math import sqrt
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models import Sum
@@ -44,6 +45,11 @@ class Medicamento(models.Model):
     clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name="medicamentos")
     nome = models.CharField(max_length=160)
     principio_ativo = models.CharField(max_length=160, blank=True)
+    observacoes = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="Informações administrativas ou farmacêuticas adicionais para revisão humana.",
+    )
     ativo = models.BooleanField(default=True)
     criado_em = models.DateTimeField(auto_now_add=True)
 
@@ -94,6 +100,11 @@ class Apresentacao(models.Model):
     )
     fonte_referencia = models.CharField(
         max_length=200, blank=True, help_text="Fonte/bula/referência da estabilidade."
+    )
+    observacoes = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="Informações adicionais sobre esta apresentação.",
     )
     ativa = models.BooleanField(default=True)
 
@@ -222,6 +233,29 @@ class MedicacaoOral(models.Model):
     medicamento = models.ForeignKey(
         Medicamento, on_delete=models.PROTECT, related_name="agendamentos_orais"
     )
+    apresentacao = models.ForeignKey(
+        Apresentacao,
+        on_delete=models.PROTECT,
+        related_name="agendamentos_orais",
+        null=True,
+        blank=True,
+        help_text="Apresentação prevista para compra/dispensação, quando definida.",
+    )
+    dose_prescrita = models.CharField(
+        max_length=120,
+        blank=True,
+        help_text="Texto transcrito da prescrição; exige conferência profissional.",
+    )
+    posologia = models.CharField(
+        max_length=240,
+        blank=True,
+        help_text="Posologia transcrita da prescrição; exige conferência profissional.",
+    )
+    quantidade_por_ciclo = models.PositiveIntegerField(
+        default=1,
+        validators=[MinValueValidator(1)],
+        help_text="Unidades de estoque da apresentação por ciclo para planejamento de compra.",
+    )
     classe = models.CharField(max_length=20, choices=Classe.choices)
     data_inicio = models.DateField()
     quantidade_ciclos = models.PositiveSmallIntegerField(
@@ -257,6 +291,15 @@ class MedicacaoOral(models.Model):
         related_name="medicacoes_orais_revisadas",
     )
     revisado_em = models.DateTimeField(null=True, blank=True)
+    vigente = models.BooleanField(default=True)
+    substitui = models.OneToOneField(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="versoes_posteriores",
+    )
+    motivo_alteracao = models.CharField(max_length=300, blank=True)
     criado_em = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)
 
@@ -265,7 +308,8 @@ class MedicacaoOral(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["clinica", "paciente", "medicamento", "data_inicio"],
-                name="medicacao_oral_sem_duplicidade_exata",
+                condition=models.Q(vigente=True),
+                name="medicacao_oral_vigente_sem_duplicidade_exata",
             ),
             models.CheckConstraint(
                 condition=models.Q(ciclo_atual__lte=models.F("quantidade_ciclos")),
@@ -275,6 +319,25 @@ class MedicacaoOral(models.Model):
 
     def __str__(self):
         return f"{self.paciente} — {self.medicamento}"
+
+    def clean(self):
+        erros = {}
+        if self.paciente_id and self.clinica_id:
+            if self.paciente.clinica_id != self.clinica_id:
+                erros["paciente"] = "O paciente deve pertencer à clínica selecionada."
+        if self.medicamento_id and self.clinica_id:
+            if self.medicamento.clinica_id != self.clinica_id:
+                erros["medicamento"] = "O medicamento deve pertencer à clínica selecionada."
+        if self.apresentacao_id and self.medicamento_id:
+            if self.apresentacao.medicamento_id != self.medicamento_id:
+                erros["apresentacao"] = "A apresentação deve pertencer ao medicamento selecionado."
+        if self.substitui_id:
+            if self.substitui_id == self.pk:
+                erros["substitui"] = "Uma versão não pode substituir a si mesma."
+            elif self.clinica_id and self.substitui.clinica_id != self.clinica_id:
+                erros["substitui"] = "A versão anterior deve pertencer à mesma clínica."
+        if erros:
+            raise ValidationError(erros)
 
     @property
     def data_proxima_dispensacao(self):
@@ -373,6 +436,7 @@ class SessaoTratamento(models.Model):
     )
     observacoes = models.CharField(max_length=500, blank=True)
     criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["data_hora"]
@@ -397,8 +461,14 @@ class Lote(models.Model):
     quantidade_inicial = models.PositiveIntegerField(default=0)
     quantidade_atual = models.PositiveIntegerField(default=0)
     estoque_minimo = models.PositiveIntegerField(default=5)
+    observacoes = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="Informações adicionais sobre o lote e sua armazenagem.",
+    )
     ativo = models.BooleanField(default=True)
     criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["data_validade", "apresentacao__medicamento__nome"]

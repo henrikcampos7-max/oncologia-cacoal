@@ -603,7 +603,7 @@ def calcular_sugestao_compras(clinica, dias=30, margem_seguranca=5):
 
     from django.utils import timezone
 
-    from .models import Lote
+    from .models import Lote, MedicacaoOral
 
     hoje = timezone.localdate()
     sessoes_proximas = clinica.sessoes.select_related("paciente", "protocolo").prefetch_related(
@@ -648,8 +648,56 @@ def calcular_sugestao_compras(clinica, dias=30, margem_seguranca=5):
                 "sobras_iniciais_mg": (
                     projecao["sobras_iniciais_mg"] if projecao else Decimal("0")
                 ),
+                "unidades_orais": 0,
             }
         )
+
+    fim = hoje + timedelta(days=dias)
+    agendamentos_orais = clinica.medicacoes_orais.select_related(
+        "medicamento", "apresentacao"
+    ).filter(vigente=True).exclude(
+        status__in=[MedicacaoOral.Status.PAUSADA, MedicacaoOral.Status.CONCLUIDA]
+    )
+    linhas_orais = resumir_medicacoes_orais(agendamentos_orais, hoje, fim)
+    por_apresentacao = {item["apresentacao"].pk: item for item in sugestoes}
+    for linha_oral in linhas_orais:
+        apresentacao = linha_oral["apresentacao_objeto"]
+        if apresentacao is None:
+            continue
+        unidades = linha_oral["unidades"]
+        sugestao = por_apresentacao.get(apresentacao.pk)
+        if sugestao:
+            sugestao["necessario"] += unidades
+            sugestao["frascos_sem_reaproveitamento"] += unidades
+            sugestao["frascos_com_reaproveitamento"] += unidades
+            sugestao["unidades_orais"] += unidades
+            sugestao["falta"] = max(0, sugestao["necessario"] - sugestao["estoque"])
+            sugestao["sugerido_compra"] = (
+                sugestao["falta"] + margem_seguranca if sugestao["falta"] > 0 else 0
+            )
+            continue
+        estoque_disponivel = sum(
+            lote.quantidade_disponivel
+            for lote in Lote.objects.filter(
+                clinica=clinica, apresentacao=apresentacao, ativo=True
+            )
+        )
+        falta = max(0, unidades - estoque_disponivel)
+        nova = {
+            "apresentacao": apresentacao,
+            "necessario": unidades,
+            "estoque": estoque_disponivel,
+            "falta": falta,
+            "sugerido_compra": falta + margem_seguranca if falta > 0 else 0,
+            "frascos_sem_reaproveitamento": unidades,
+            "frascos_com_reaproveitamento": unidades,
+            "economia_frascos": 0,
+            "quantidade_reaproveitada_mg": Decimal("0"),
+            "sobras_iniciais_mg": Decimal("0"),
+            "unidades_orais": unidades,
+        }
+        sugestoes.append(nova)
+        por_apresentacao[apresentacao.pk] = nova
     sugestoes.sort(key=lambda s: (s["apresentacao"].medicamento.nome, s["apresentacao"].descricao))
     return sugestoes
 
@@ -915,6 +963,52 @@ def resumir_sessoes(sessoes):
         )
     linhas.sort(key=lambda linha: (linha["medicamento"], linha["apresentacao"]))
     return linhas, inconsistencias
+
+
+def resumir_medicacoes_orais(agendamentos, data_inicial, data_final):
+    """Resume ciclos orais previstos no período sem inferir regra clínica.
+
+    A quantidade é a informada manualmente no planejamento e só é tratada como
+    previsão logística. Linhas sem apresentação continuam visíveis, mas não
+    entram automaticamente em sugestão de compra por lote/apresentação.
+    """
+    acumulado = defaultdict(
+        lambda: {"ciclos": 0, "unidades": 0, "pacientes": set()}
+    )
+    for agendamento in agendamentos:
+        for ciclo in agendamento.ciclos_previstos:
+            if ciclo["numero"] < agendamento.ciclo_atual:
+                continue
+            if not data_inicial <= ciclo["data"] <= data_final:
+                continue
+            chave = (
+                f"apresentacao:{agendamento.apresentacao_id}"
+                if agendamento.apresentacao_id
+                else f"medicamento:{agendamento.medicamento_id}"
+            )
+            dados = acumulado[chave]
+            dados["medicamento"] = agendamento.medicamento
+            dados["apresentacao"] = agendamento.apresentacao
+            dados["ciclos"] += 1
+            dados["unidades"] += agendamento.quantidade_por_ciclo
+            dados["pacientes"].add(agendamento.paciente_id)
+
+    linhas = []
+    for dados in acumulado.values():
+        apresentacao = dados["apresentacao"]
+        linhas.append(
+            {
+                "medicamento": dados["medicamento"].nome,
+                "apresentacao": apresentacao.descricao if apresentacao else "Não definida",
+                "apresentacao_objeto": apresentacao,
+                "ciclos": dados["ciclos"],
+                "pacientes": len(dados["pacientes"]),
+                "unidades": dados["unidades"],
+                "requer_apresentacao": apresentacao is None,
+            }
+        )
+    linhas.sort(key=lambda linha: (linha["medicamento"], linha["apresentacao"]))
+    return linhas
 
 
 def processar_baixa_estoque_sessao(sessao, usuario=None):

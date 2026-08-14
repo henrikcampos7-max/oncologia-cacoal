@@ -7,8 +7,9 @@
     <div><label for="protocolo">Filtro tratamento</label><input id="protocolo" name="protocolo" value="{{ protocolo_filtro }}" placeholder="Protocolo..."></div>
     <div class="actions">
       <button class="button primary" type="submit">Filtrar</button>
-      <a class="button secondary" href="{% url 'agenda_csv' %}?data={{ data_filtro|date:'Y-m-d' }}&paciente={{ busca|urlencode }}&protocolo={{ protocolo_filtro|urlencode }}">CSV</a>
-      <a class="button secondary" href="{% url 'agenda_impressao' %}?data={{ data_filtro|date:'Y-m-d' }}" target="_blank">PDF/Imprimir</a>
+      {% if pode_editar %}<a class="button primary" href="#novo-agendamento">+ Agendar paciente</a>{% endif %}
+      {% if pode_exportar %}<a class="button secondary" href="{% url 'agenda_csv' %}?data={{ data_filtro|date:'Y-m-d' }}&paciente={{ busca|urlencode }}&protocolo={{ protocolo_filtro|urlencode }}">CSV</a>
+      <a class="button secondary" href="{% url 'agenda_impressao' %}?data={{ data_filtro|date:'Y-m-d' }}" target="_blank">PDF/Imprimir</a>{% endif %}
     </div>
   </form>
 </section>
@@ -23,7 +24,7 @@
           <th>Protocolo</th>
           <th>Ciclo/Dia</th>
           <th>Status</th>
-          {% if pode_editar %}<th>Ações de Status</th>{% endif %}
+          {% if pode_editar %}<th>Ações</th>{% endif %}
         </tr>
       </thead>
       <tbody>
@@ -40,6 +41,9 @@
           {% if pode_editar %}
           <td>
             <div style="display: flex; gap: 5px;">
+              {% if sessao.status == 'agendada' or sessao.status == 'confirmada' %}
+                <a class="button secondary small" href="{% url 'editar_sessao' sessao.pk %}">Editar</a>
+              {% endif %}
               {% if sessao.status == 'agendada' %}
                 <form method="post" action="{% url 'atualizar_status_sessao' sessao.pk %}">
                   {% csrf_token %}
@@ -79,17 +83,17 @@
 </section>
 
 {% if pode_editar %}
-<section class="card">
+<section class="card" id="novo-agendamento">
   <div class="section-heading">
     <div>
-      <h2>Próximo dia de tratamento</h2>
-      <p>Registre conforme protocolo e submeta à revisão da equipe.</p>
+      <h2>Agendar paciente</h2>
+      <p>Registre data, horário, protocolo, ciclo e observações para revisão da equipe.</p>
     </div>
   </div>
   <form method="post" class="form-grid session-grid">
     {% csrf_token %}
     {{ form.as_p }}
-    <button class="button primary" type="submit">Registrar Tratamento</button>
+    <button class="button primary" type="submit">Salvar agendamento</button>
   </form>
 </section>
 {% endif %}

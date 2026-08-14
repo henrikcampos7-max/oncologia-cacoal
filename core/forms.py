@@ -61,9 +61,25 @@ class PacienteForm(forms.ModelForm):
             self.fields["protocolo"].queryset = clinica.protocolos.filter(ativo=True)
 
 
+class PacienteEdicaoForm(PacienteForm):
+    class Meta(PacienteForm.Meta):
+        fields = PacienteForm.Meta.fields + ["ativo"]
+
+    def __init__(self, *args, pode_alterar_ativo=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not pode_alterar_ativo:
+            self.fields.pop("ativo", None)
+
+
 class MedicamentoApresentacaoForm(forms.Form):
     nome = forms.CharField(max_length=160, label="Nome do medicamento")
     principio_ativo = forms.CharField(max_length=160, required=False)
+    observacoes_medicamento = forms.CharField(
+        max_length=500,
+        required=False,
+        label="Observações do medicamento",
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
     concentracao = forms.CharField(max_length=80, help_text="Ex.: 1 mg/mL")
     apresentacao = forms.CharField(max_length=120, help_text="Ex.: Frasco 50 mg")
     quantidade_mg = forms.DecimalField(
@@ -90,12 +106,21 @@ class MedicamentoApresentacaoForm(forms.Form):
     fonte_referencia = forms.CharField(
         max_length=200, required=False, label="Fonte/referência"
     )
+    observacoes = forms.CharField(
+        max_length=500,
+        required=False,
+        label="Outras observações da apresentação",
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
 
     def save(self, clinica):
         medicamento, _ = Medicamento.objects.get_or_create(
             clinica=clinica,
             nome=self.cleaned_data["nome"],
-            defaults={"principio_ativo": self.cleaned_data["principio_ativo"]},
+            defaults={
+                "principio_ativo": self.cleaned_data["principio_ativo"],
+                "observacoes": self.cleaned_data.get("observacoes_medicamento", ""),
+            },
         )
         return Apresentacao.objects.create(
             medicamento=medicamento,
@@ -107,14 +132,25 @@ class MedicamentoApresentacaoForm(forms.Form):
             condicoes_armazenamento=self.cleaned_data.get("condicoes_armazenamento", ""),
             observacoes_estabilidade=self.cleaned_data.get("observacoes_estabilidade", ""),
             fonte_referencia=self.cleaned_data.get("fonte_referencia", ""),
+            observacoes=self.cleaned_data.get("observacoes", ""),
         )
 
 
 class SessaoTratamentoForm(forms.ModelForm):
     class Meta:
         model = SessaoTratamento
-        fields = ["paciente", "protocolo", "data_hora", "ciclo", "dia_ciclo", "status"]
-        widgets = {"data_hora": DateTimeInput(format="%Y-%m-%dT%H:%M")}
+        fields = [
+            "paciente",
+            "protocolo",
+            "data_hora",
+            "ciclo",
+            "dia_ciclo",
+            "observacoes",
+        ]
+        widgets = {
+            "data_hora": DateTimeInput(format="%Y-%m-%dT%H:%M"),
+            "observacoes": forms.Textarea(attrs={"rows": 3}),
+        }
 
     def __init__(self, *args, clinica=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -131,12 +167,24 @@ class PeriodoForm(forms.Form):
 
 
 class MedicacaoOralForm(forms.ModelForm):
+    quantidade_por_ciclo = forms.IntegerField(
+        min_value=1,
+        initial=1,
+        required=False,
+        label="Unidades da apresentação por ciclo",
+        help_text="Informe unidades de estoque da apresentação escolhida, como caixas ou frascos; não informe comprimidos se o estoque é controlado por caixa.",
+    )
+
     class Meta:
         model = MedicacaoOral
         fields = [
             "paciente",
             "classe",
             "medicamento",
+            "apresentacao",
+            "dose_prescrita",
+            "posologia",
+            "quantidade_por_ciclo",
             "data_inicio",
             "quantidade_ciclos",
             "intervalo_dias",
@@ -148,9 +196,14 @@ class MedicacaoOralForm(forms.ModelForm):
         ]
         widgets = {
             "data_inicio": DateInput(),
+            "posologia": forms.Textarea(attrs={"rows": 2}),
             "observacoes": forms.Textarea(attrs={"rows": 3}),
         }
         labels = {
+            "apresentacao": "Apresentação prevista",
+            "dose_prescrita": "Dose prescrita",
+            "posologia": "Posologia",
+            "quantidade_por_ciclo": "Unidades da apresentação por ciclo",
             "quantidade_ciclos": "Quantidade de ciclos previstos",
             "intervalo_dias": "Intervalo entre dispensações (dias)",
             "renovacao_pedido_meses": "Renovação do pedido médico (meses)",
@@ -163,17 +216,51 @@ class MedicacaoOralForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields["paciente"].queryset = Paciente.objects.none()
         self.fields["medicamento"].queryset = Medicamento.objects.none()
+        self.fields["apresentacao"].queryset = Apresentacao.objects.none()
         if clinica:
             self.fields["paciente"].queryset = clinica.pacientes.filter(ativo=True)
             self.fields["medicamento"].queryset = clinica.medicamentos.filter(ativo=True)
+            self.fields["apresentacao"].queryset = Apresentacao.objects.filter(
+                medicamento__clinica=clinica, ativa=True
+            ).select_related("medicamento")
 
     def clean(self):
         cleaned = super().clean()
+        cleaned["quantidade_por_ciclo"] = cleaned.get("quantidade_por_ciclo") or 1
         paciente = cleaned.get("paciente")
         medicamento = cleaned.get("medicamento")
+        apresentacao = cleaned.get("apresentacao")
+        ciclo_atual = cleaned.get("ciclo_atual")
+        quantidade_ciclos = cleaned.get("quantidade_ciclos")
         if paciente and medicamento and paciente.clinica_id != medicamento.clinica_id:
             raise forms.ValidationError("Paciente e medicamento devem pertencer à mesma clínica.")
+        if apresentacao and medicamento and apresentacao.medicamento_id != medicamento.pk:
+            self.add_error(
+                "apresentacao",
+                "A apresentação selecionada deve pertencer ao medicamento informado.",
+            )
+        if ciclo_atual and quantidade_ciclos and ciclo_atual > quantidade_ciclos:
+            self.add_error(
+                "ciclo_atual",
+                "O ciclo atual não pode ser maior que a quantidade prevista.",
+            )
         return cleaned
+
+
+class MedicacaoOralEdicaoForm(MedicacaoOralForm):
+    motivo_alteracao = forms.CharField(
+        max_length=300,
+        label="Motivo da alteração",
+        widget=forms.Textarea(attrs={"rows": 2}),
+        help_text="Obrigatório para preservar a rastreabilidade da mudança.",
+    )
+
+    class Meta(MedicacaoOralForm.Meta):
+        fields = MedicacaoOralForm.Meta.fields + ["ciclo_atual"]
+        labels = {
+            **MedicacaoOralForm.Meta.labels,
+            "ciclo_atual": "Ciclo atual",
+        }
 
 
 class ConfiguracaoClinicaForm(forms.ModelForm):
@@ -252,6 +339,7 @@ class LoteForm(forms.ModelForm):
             "data_validade",
             "quantidade_inicial",
             "estoque_minimo",
+            "observacoes",
         ]
         widgets = {"data_validade": DateInput()}
         labels = {
@@ -260,16 +348,71 @@ class LoteForm(forms.ModelForm):
             "data_validade": "Data de validade",
             "quantidade_inicial": "Quantidade inicial (frascos)",
             "estoque_minimo": "Estoque mínimo recomendado",
+            "observacoes": "Observações do lote",
         }
 
     def __init__(self, *args, clinica=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.clinica = clinica
         from .models import Apresentacao
         self.fields["apresentacao"].queryset = Apresentacao.objects.none()
         if clinica:
             self.fields["apresentacao"].queryset = Apresentacao.objects.filter(
                 medicamento__clinica=clinica, ativa=True
             ).select_related("medicamento")
+
+    def clean(self):
+        cleaned = super().clean()
+        apresentacao = cleaned.get("apresentacao")
+        numero_lote = cleaned.get("numero_lote")
+        if self.clinica and apresentacao and numero_lote:
+            duplicados = Lote.objects.filter(
+                clinica=self.clinica,
+                apresentacao=apresentacao,
+                numero_lote__iexact=numero_lote.strip(),
+            )
+            if self.instance.pk:
+                duplicados = duplicados.exclude(pk=self.instance.pk)
+            if duplicados.exists():
+                self.add_error("numero_lote", "Este lote já está cadastrado para a apresentação.")
+        if self.instance.pk:
+            possui_historico = (
+                self.instance.quantidade_atual > 0
+                or self.instance.movimentacoes.exists()
+            )
+            if "apresentacao" in self.changed_data and possui_historico:
+                self.add_error(
+                    "apresentacao",
+                    "A apresentação não pode ser trocada após existir saldo ou movimentação.",
+                )
+            if (
+                cleaned.get("ativo") is False
+                and (
+                    self.instance.quantidade_atual > 0
+                    or self.instance.quantidade_reservada > 0
+                )
+            ):
+                self.add_error(
+                    "ativo",
+                    "Zere o saldo e as reservas por movimentações auditáveis antes de desativar o lote.",
+                )
+        return cleaned
+
+
+class LoteEdicaoForm(LoteForm):
+    class Meta(LoteForm.Meta):
+        fields = [
+            "apresentacao",
+            "numero_lote",
+            "data_validade",
+            "estoque_minimo",
+            "observacoes",
+            "ativo",
+        ]
+        labels = {
+            **LoteForm.Meta.labels,
+            "ativo": "Lote ativo",
+        }
 
 
 class MovimentacaoEstoqueForm(forms.ModelForm):
@@ -297,10 +440,11 @@ class MovimentacaoEstoqueForm(forms.ModelForm):
 class MedicamentoForm(forms.ModelForm):
     class Meta:
         model = Medicamento
-        fields = ["nome", "principio_ativo", "ativo"]
+        fields = ["nome", "principio_ativo", "observacoes", "ativo"]
         labels = {
             "nome": "Nome do medicamento",
             "principio_ativo": "Princípio ativo",
+            "observacoes": "Observações",
             "ativo": "Ativo",
         }
 
@@ -389,6 +533,7 @@ class ApresentacaoForm(forms.ModelForm):
             "condicoes_armazenamento",
             "observacoes_estabilidade",
             "fonte_referencia",
+            "observacoes",
             "ativa",
         ]
         labels = {
@@ -400,6 +545,7 @@ class ApresentacaoForm(forms.ModelForm):
             "condicoes_armazenamento": "Condições de armazenamento",
             "observacoes_estabilidade": "Observações de estabilidade",
             "fonte_referencia": "Fonte/referência",
+            "observacoes": "Outras observações",
             "ativa": "Ativa",
         }
 

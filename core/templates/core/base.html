@@ -30,8 +30,8 @@
         <a class="{% if request.resolver_match.url_name == 'importacoes' %}active{% endif %}" href="{% url 'importacoes' %}">⇧ <span>Importações</span></a>
         <a class="{% if request.resolver_match.url_name == 'alertas' %}active{% endif %}" href="{% url 'alertas' %}">△ <span>Alertas</span></a>
         <a class="{% if request.resolver_match.url_name == 'relatorios' %}active{% endif %}" href="{% url 'relatorios' %}">▨ <span>Relatórios</span></a>
-        <a class="{% if request.resolver_match.url_name == 'auditoria' %}active{% endif %}" href="{% url 'auditoria' %}">◎ <span>Permissões e Auditoria</span></a>
-        <a class="{% if request.resolver_match.url_name == 'configuracoes' %}active{% endif %}" href="{% url 'configuracoes' %}">⚙ <span>Configurações</span></a>
+        {% if perfil.papel == 'administrador' or perfil.papel == 'farmaceutico' %}<a class="{% if request.resolver_match.url_name == 'auditoria' %}active{% endif %}" href="{% url 'auditoria' %}">◎ <span>Permissões e Auditoria</span></a>{% endif %}
+        {% if perfil.papel == 'administrador' %}<a class="{% if request.resolver_match.url_name == 'configuracoes' %}active{% endif %}" href="{% url 'configuracoes' %}">⚙ <span>Configurações</span></a>{% endif %}
         {% if perfil.papel == 'administrador' %}<a class="{% if request.resolver_match.url_name == 'solicitacoes_acesso' %}active{% endif %}" href="{% url 'solicitacoes_acesso' %}">✉ <span>Solicitações de Acesso</span></a>{% endif %}
       </nav>
       <div class="sidebar-footer">

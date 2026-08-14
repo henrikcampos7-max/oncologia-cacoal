@@ -3,6 +3,18 @@
 {% block content %}
 <div style="display: flex; flex-direction: column; gap: 20px;">
 
+  {% if pode_exportar_relacoes %}<section class="card">
+    <div class="section-heading"><div><h2>Gerar relação detalhada</h2><p>Exporte somente o conjunto necessário. Relações identificadas exigem perfil farmacêutico ou administrador e ficam registradas na auditoria.</p></div></div>
+    <form method="get" action="{% url 'relatorio_operacional_csv' %}" class="form-grid filters-grid">
+      <p><label for="id_tipo_relatorio">Relação</label><select id="id_tipo_relatorio" name="tipo" required><option value="">Selecione</option>{% for valor, rotulo in tipos_relatorio %}<option value="{{ valor }}">{{ rotulo }}</option>{% endfor %}</select></p>
+      <p><label for="id_data_inicial_relatorio">Data inicial</label><input id="id_data_inicial_relatorio" type="date" name="data_inicial" value="{{ relatorio_data_inicial|date:'Y-m-d' }}" required></p>
+      <p><label for="id_data_final_relatorio">Data final</label><input id="id_data_final_relatorio" type="date" name="data_final" value="{{ relatorio_data_final|date:'Y-m-d' }}" required></p>
+      <p><label for="id_medicamento_relatorio">Medicamento específico (opcional)</label><select id="id_medicamento_relatorio" name="medicamento"><option value="">Todos</option>{% for medicamento in medicamentos_relatorio %}<option value="{{ medicamento.pk }}">{{ medicamento.nome }}</option>{% endfor %}</select></p>
+      <div class="actions"><button class="button primary" type="submit">Gerar CSV</button></div>
+    </form>
+    <p class="method">Para “Medicamento específico por período”, selecione obrigatoriamente o medicamento. O relatório combina ocorrências infusionais e ciclos orais previstos, sem interpretar prescrição.</p>
+  </section>{% endif %}
+
   <section class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
       <h2 style="margin:0;">Indicadores da Clínica</h2>

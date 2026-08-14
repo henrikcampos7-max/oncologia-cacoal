@@ -1,4 +1,5 @@
 import csv
+import json
 import os
 from datetime import date, timedelta
 
@@ -6,22 +7,27 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError, transaction
-from django.db.models import F, Sum
-from django.http import HttpResponse, JsonResponse
+from django.db.models import F, Prefetch, Q, Sum
+from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.crypto import get_random_string
 from django.views.decorators.cache import never_cache
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_POST
 
 from .forms import (
     ApresentacaoForm,
+    ConfiguracaoClinicaForm,
     ImportacaoArquivoForm,
     ItemProtocoloForm,
+    LoteEdicaoForm,
     LoteForm,
+    MedicacaoOralEdicaoForm,
+    MedicacaoOralForm,
     MedicamentoApresentacaoForm,
     MedicamentoForm,
     MovimentacaoEstoqueForm,
+    PacienteEdicaoForm,
     PacienteForm,
     PeriodoForm,
     ProtocoloForm,
@@ -32,12 +38,14 @@ from .forms import (
 from .models import (
     Apresentacao,
     Clinica,
+    ConfiguracaoClinica,
     DivergenciaTransferencia,
     ExtracaoEvidencia,
     ItemPedidoCompra,
     ItemProtocolo,
     ItemTransferencia,
     Lote,
+    MedicacaoOral,
     Medicamento,
     MovimentacaoEstoque,
     Paciente,
@@ -61,9 +69,11 @@ from .services import (
     importar_transferencia_pdf,
     importar_transferencias,
     inspecionar_importacao,
+    numero_na_lista,
     processar_baixa_estoque_sessao,
     processar_saida_lotes,
     registrar_auditoria,
+    resumir_medicacoes_orais,
     resumir_sessoes,
     sobras_reais_expiradas,
     sobras_reais_validas,
@@ -81,11 +91,80 @@ from .conferencia import (
 )
 
 
+PAPEIS_EXPORTACAO_IDENTIFICADA = {
+    PerfilUsuario.Papel.ADMINISTRADOR,
+    PerfilUsuario.Papel.FARMACEUTICO,
+}
+
+
+def _campos_alterados(form):
+    return [form.fields[campo].label or campo for campo in form.changed_data]
+
+
+def _detalhe_edicao(entidade, objeto_id, form, complemento=""):
+    campos = _campos_alterados(form)
+    resumo = ", ".join(campos) if campos else "nenhum campo"
+    alteracoes = {}
+    for campo in form.changed_data:
+        anterior = form.initial.get(campo, "")
+        novo = form.cleaned_data.get(campo, "")
+        if hasattr(anterior, "pk"):
+            anterior = anterior.pk
+        if hasattr(novo, "pk"):
+            novo = novo.pk
+        if hasattr(anterior, "isoformat"):
+            anterior = anterior.isoformat()
+        if hasattr(novo, "isoformat"):
+            novo = novo.isoformat()
+        alteracoes[campo] = {
+            "anterior": str(anterior)[:300],
+            "novo": str(novo)[:300],
+        }
+    detalhe = (
+        f"{entidade} {objeto_id}; campos alterados: {resumo}; "
+        f"antes/depois: {json.dumps(alteracoes, ensure_ascii=False, sort_keys=True)}."
+    )
+    return f"{detalhe} {complemento}".strip()
+
+
+def _csv_seguro(valor):
+    """Neutraliza fórmulas sem alterar os dados persistidos."""
+    if valor is None:
+        return ""
+    texto = str(valor)
+    if texto.lstrip(" \t\r\n").startswith(("=", "+", "-", "@")):
+        return "'" + texto
+    return texto
+
+
+def _periodo_exportacao(request, padrao_dias=30):
+    hoje = timezone.localdate()
+    inicio_texto = request.GET.get("data_inicial") or hoje.isoformat()
+    fim_texto = request.GET.get("data_final") or (hoje + timedelta(days=padrao_dias)).isoformat()
+    try:
+        inicio = date.fromisoformat(inicio_texto)
+        fim = date.fromisoformat(fim_texto)
+    except ValueError:
+        return None, None, "Período inválido. Use datas no formato AAAA-MM-DD."
+    if fim < inicio:
+        return None, None, "A data final deve ser igual ou posterior à inicial."
+    if (fim - inicio).days > 366:
+        return None, None, "O período máximo por relatório é de 366 dias."
+    return inicio, fim, ""
+
+
 @never_cache
 @require_GET
 def health(request):
     """Confirma que a aplicação respondeu; não consulta nem expõe dados."""
     return JsonResponse({"status": "ok", "sistema": "Oncologia Cacoal"})
+
+
+@require_GET
+def favicon(request):
+    response = HttpResponse(status=204)
+    response["Cache-Control"] = "public, max-age=86400"
+    return response
 
 
 def solicitar_acesso(request):
@@ -181,7 +260,16 @@ def _perfil(request):
 
 def _contexto(request, titulo):
     perfil = _perfil(request)
-    return {"titulo": titulo, "perfil": perfil, "clinica": perfil.clinica if perfil else None}
+    clinica = perfil.clinica if perfil else None
+    configuracao = None
+    if clinica:
+        configuracao, _ = ConfiguracaoClinica.objects.get_or_create(clinica=clinica)
+    return {
+        "titulo": titulo,
+        "perfil": perfil,
+        "clinica": clinica,
+        "configuracao_global": configuracao,
+    }
 
 
 def _pode_editar(perfil, papeis):
@@ -194,13 +282,22 @@ def dashboard(request):
     clinica = contexto["clinica"]
     if clinica:
         hoje = timezone.localdate()
+        periodo_dias = contexto["configuracao_global"].periodo_padrao_dias
+        vencidos, criticos_validade, _, estoque_baixo = coletar_alertas_estoque(clinica)
+        itens_criticos = len(vencidos)
+        if contexto["configuracao_global"].alertar_validade_30_dias:
+            itens_criticos += len(criticos_validade)
+        if contexto["configuracao_global"].alertar_estoque_minimo:
+            itens_criticos += len(estoque_baixo)
         contexto.update(
             pacientes_total=clinica.pacientes.filter(ativo=True).count(),
             medicamentos_total=clinica.medicamentos.filter(ativo=True).count(),
             aplicacoes_7_dias=clinica.sessoes.filter(
-                data_hora__date__range=(hoje, hoje + timedelta(days=7)),
+                data_hora__date__range=(hoje, hoje + timedelta(days=periodo_dias)),
                 status__in=["agendada", "confirmada"],
             ).count(),
+            periodo_painel_dias=periodo_dias,
+            itens_criticos=itens_criticos,
             proximas_sessoes=clinica.sessoes.select_related("paciente", "protocolo")
             .filter(data_hora__gte=timezone.now())[:6],
         )
@@ -246,6 +343,13 @@ def agenda(request):
             try:
                 with transaction.atomic():
                     sessao.save()
+                    registrar_auditoria(
+                        clinica,
+                        request.user,
+                        "Cadastro de agendamento",
+                        f"Sessão {sessao.pk} cadastrada para revisão; paciente {sessao.paciente_id}; protocolo {sessao.protocolo_id}.",
+                        request=request,
+                    )
             except IntegrityError:
                 form.add_error(None, "Já existe uma aplicação igual para este paciente, data, ciclo e dia.")
             else:
@@ -259,15 +363,110 @@ def agenda(request):
         busca=busca,
         protocolo_filtro=protocolo,
         pode_editar=pode_editar,
+        pode_exportar=perfil.papel in PAPEIS_EXPORTACAO_IDENTIFICADA,
     )
     return render(request, "core/agenda.html", contexto)
 
 
 @login_required
+def editar_sessao(request, pk):
+    contexto = _contexto(request, "Editar Agendamento")
+    clinica, perfil = contexto["clinica"], contexto["perfil"]
+    pode_editar = _pode_editar(
+        perfil,
+        {
+            PerfilUsuario.Papel.ADMINISTRADOR,
+            PerfilUsuario.Papel.FARMACEUTICO,
+            PerfilUsuario.Papel.ENFERMAGEM,
+        },
+    )
+    if not clinica or not pode_editar:
+        return HttpResponse("Perfil sem permissão para editar agendamentos.", status=403)
+    sessao = SessaoTratamento.objects.filter(pk=pk, clinica=clinica).first()
+    if not sessao:
+        return HttpResponse("Sessão não encontrada.", status=404)
+    if request.method == "POST":
+        salvo = False
+        try:
+            with transaction.atomic():
+                sessao = SessaoTratamento.objects.select_for_update().get(
+                    pk=pk, clinica=clinica
+                )
+                if sessao.status not in {
+                    SessaoTratamento.Status.AGENDADA,
+                    SessaoTratamento.Status.CONFIRMADA,
+                }:
+                    return HttpResponse(
+                        "Sessões encerradas não podem ser sobrescritas; use um fluxo de correção auditável.",
+                        status=409,
+                    )
+                form = SessaoTratamentoForm(
+                    request.POST, instance=sessao, clinica=clinica
+                )
+                if form.is_valid():
+                    if not form.changed_data:
+                        form.add_error(None, "Altere ao menos um campo do agendamento.")
+                    else:
+                        if form.cleaned_data["paciente"].clinica_id != clinica.pk:
+                            return HttpResponse(
+                                "Paciente fora da clínica selecionada.", status=403
+                            )
+                        if form.cleaned_data["protocolo"].clinica_id != clinica.pk:
+                            return HttpResponse(
+                                "Protocolo fora da clínica selecionada.", status=403
+                            )
+                        status_anterior = sessao.status
+                        sessao = form.save(commit=False)
+                        if status_anterior == SessaoTratamento.Status.CONFIRMADA:
+                            sessao.status = SessaoTratamento.Status.AGENDADA
+                        sessao.save()
+                        registrar_auditoria(
+                            clinica,
+                            request.user,
+                            "Edição de agendamento",
+                            _detalhe_edicao(
+                                "Sessão",
+                                sessao.pk,
+                                form,
+                                (
+                                    "Status confirmado reiniciado para agendada; nova conferência obrigatória."
+                                    if status_anterior
+                                    == SessaoTratamento.Status.CONFIRMADA
+                                    else ""
+                                ),
+                            ),
+                            request=request,
+                        )
+                        salvo = True
+        except IntegrityError:
+            form.add_error(
+                None,
+                "Já existe uma aplicação igual para este paciente, data, ciclo e dia.",
+            )
+        if salvo:
+            messages.success(
+                request, "Agendamento atualizado e enviado para conferência."
+            )
+            return redirect("agenda")
+    else:
+        if sessao.status not in {
+            SessaoTratamento.Status.AGENDADA,
+            SessaoTratamento.Status.CONFIRMADA,
+        }:
+            return HttpResponse(
+                "Sessões encerradas não podem ser sobrescritas; use um fluxo de correção auditável.",
+                status=409,
+            )
+        form = SessaoTratamentoForm(instance=sessao, clinica=clinica)
+    contexto.update(form=form, sessao=sessao)
+    return render(request, "core/editar_sessao.html", contexto)
+
+
+@login_required
 def agenda_csv(request):
     perfil = _perfil(request)
-    if not perfil:
-        return HttpResponse("Usuário sem clínica vinculada.", status=403)
+    if not perfil or perfil.papel not in PAPEIS_EXPORTACAO_IDENTIFICADA:
+        return HttpResponse("Perfil sem permissão para exportar a agenda.", status=403)
     sessoes, _, _, _ = _sessoes_filtradas(request, perfil.clinica)
     response = HttpResponse(content_type="text/csv; charset=utf-8")
     response["Content-Disposition"] = 'attachment; filename="agenda-oncologia-cacoal.csv"'
@@ -278,22 +477,108 @@ def agenda_csv(request):
         writer.writerow(
             [
                 timezone.localtime(sessao.data_hora).strftime("%H:%M"),
-                sessao.paciente.nome,
-                sessao.protocolo.nome,
+                _csv_seguro(sessao.paciente.nome),
+                _csv_seguro(sessao.protocolo.nome),
                 sessao.ciclo,
                 sessao.dia_ciclo,
                 sessao.get_status_display(),
             ]
         )
+    registrar_auditoria(
+        perfil.clinica,
+        request.user,
+        "Exportação de agenda",
+        "Agenda exportada em CSV com os filtros autorizados.",
+        request=request,
+    )
+    return response
+
+
+@login_required
+def quantitativo_csv(request):
+    perfil = _perfil(request)
+    if not perfil:
+        return HttpResponse("Usuário sem clínica vinculada.", status=403)
+    hoje = timezone.localdate()
+    form = PeriodoForm(
+        request.GET or {"data_inicial": hoje, "data_final": hoje + timedelta(days=14)}
+    )
+    if not form.is_valid():
+        return HttpResponse("Período inválido.", status=400)
+    sessoes = perfil.clinica.sessoes.select_related(
+        "paciente", "protocolo"
+    ).prefetch_related("protocolo__itens__apresentacao__medicamento").filter(
+        data_hora__date__range=(
+            form.cleaned_data["data_inicial"],
+            form.cleaned_data["data_final"],
+        ),
+        status__in=["agendada", "confirmada"],
+    )
+    linhas, _ = resumir_sessoes(sessoes)
+    agendamentos_orais = perfil.clinica.medicacoes_orais.select_related(
+        "paciente", "medicamento", "apresentacao"
+    ).filter(vigente=True).exclude(
+        status__in=[MedicacaoOral.Status.PAUSADA, MedicacaoOral.Status.CONCLUIDA]
+    )
+    linhas_orais = resumir_medicacoes_orais(
+        agendamentos_orais,
+        form.cleaned_data["data_inicial"],
+        form.cleaned_data["data_final"],
+    )
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = 'attachment; filename="quantitativo-oncologia-cacoal.csv"'
+    response.write("\ufeff")
+    writer = csv.writer(response, delimiter=";")
+    writer.writerow(
+        ["Origem", "Medicamento", "Apresentacao", "Eventos/Ciclos", "Dose total mg", "Mg frasco", "Unidades"]
+    )
+    for linha in linhas:
+        writer.writerow(
+            [
+                "Infusional",
+                _csv_seguro(linha["medicamento"]),
+                _csv_seguro(linha["apresentacao"]),
+                linha["administracoes"],
+                linha["dose_total"],
+                linha["quantidade_mg"],
+                linha["frascos"],
+            ]
+        )
+    for linha in linhas_orais:
+        writer.writerow(
+            [
+                "Oral",
+                _csv_seguro(linha["medicamento"]),
+                _csv_seguro(linha["apresentacao"]),
+                linha["ciclos"],
+                "",
+                "",
+                linha["unidades"],
+            ]
+        )
+    registrar_auditoria(
+        perfil.clinica,
+        request.user,
+        "Exportação de quantitativo",
+        f"Quantitativo exportado de {form.cleaned_data['data_inicial']} a {form.cleaned_data['data_final']}.",
+        request=request,
+    )
     return response
 
 
 @login_required
 def agenda_impressao(request):
     perfil = _perfil(request)
-    if not perfil:
-        return HttpResponse("Usuário sem clínica vinculada.", status=403)
+    if not perfil or perfil.papel not in PAPEIS_EXPORTACAO_IDENTIFICADA:
+        return HttpResponse("Perfil sem permissão para imprimir a agenda.", status=403)
     sessoes, data_filtro, _, _ = _sessoes_filtradas(request, perfil.clinica)
+    registrar_auditoria(
+        perfil.clinica,
+        request.user,
+        "Impressão de agenda",
+        f"Agenda de {data_filtro.isoformat()} preparada para impressão por usuário autorizado.",
+        request=request,
+    )
     return render(
         request,
         "core/agenda_impressao.html",
@@ -302,6 +587,7 @@ def agenda_impressao(request):
 
 
 @login_required
+@require_POST
 def atualizar_status_sessao(request, pk):
     perfil = _perfil(request)
     if not perfil or not _pode_editar(
@@ -309,31 +595,66 @@ def atualizar_status_sessao(request, pk):
     ):
         return HttpResponse("Perfil sem permissão.", status=403)
 
-    sessao = SessaoTratamento.objects.filter(pk=pk, clinica=perfil.clinica).first()
-    if not sessao:
-        return HttpResponse("Sessão não encontrada.", status=404)
-
     novo_status = request.POST.get("status")
-    if novo_status in dict(SessaoTratamento.Status.choices):
-        mensagens = []
-        with transaction.atomic():
-            if novo_status == SessaoTratamento.Status.REALIZADA:
-                _, mensagens = processar_baixa_estoque_sessao(sessao, usuario=request.user)
-            sessao.status = novo_status
-            motivo = request.POST.get("motivo", "").strip()
-            if novo_status in (SessaoTratamento.Status.CANCELADA, SessaoTratamento.Status.FALTOU):
-                sessao.motivo = motivo[:300]
-            sessao.save()
-        messages.success(request, f"Status da sessão atualizado para '{sessao.get_status_display()}'.")
+    transicoes = {
+        SessaoTratamento.Status.AGENDADA: {
+            SessaoTratamento.Status.CONFIRMADA,
+            SessaoTratamento.Status.REALIZADA,
+            SessaoTratamento.Status.CANCELADA,
+            SessaoTratamento.Status.FALTOU,
+        },
+        SessaoTratamento.Status.CONFIRMADA: {
+            SessaoTratamento.Status.REALIZADA,
+            SessaoTratamento.Status.CANCELADA,
+            SessaoTratamento.Status.FALTOU,
+        },
+    }
+    motivo = request.POST.get("motivo", "").strip()
+    if novo_status in {
+        SessaoTratamento.Status.CANCELADA,
+        SessaoTratamento.Status.FALTOU,
+    } and not motivo:
+        return HttpResponse("Informe o motivo da falta ou do cancelamento.", status=400)
+    if novo_status not in dict(SessaoTratamento.Status.choices):
+        return HttpResponse("Status inválido.", status=400)
+    mensagens = []
+    with transaction.atomic():
+        sessao = (
+            SessaoTratamento.objects.select_for_update()
+            .filter(pk=pk, clinica=perfil.clinica)
+            .first()
+        )
+        if not sessao:
+            return HttpResponse("Sessão não encontrada.", status=404)
+        if novo_status == sessao.status:
+            messages.info(request, "O agendamento já está com esse status.")
+            return redirect("agenda")
+        if novo_status not in transicoes.get(sessao.status, set()):
+            return HttpResponse("Transição de status não permitida.", status=409)
+        status_anterior = sessao.status
+        if novo_status == SessaoTratamento.Status.REALIZADA:
+            _, mensagens = processar_baixa_estoque_sessao(
+                sessao, usuario=request.user
+            )
+        sessao.status = novo_status
+        if novo_status in (
+            SessaoTratamento.Status.CANCELADA,
+            SessaoTratamento.Status.FALTOU,
+        ):
+            sessao.motivo = motivo[:300]
+        sessao.save()
         registrar_auditoria(
             sessao.clinica,
             request.user,
             "Alteração de status de sessão",
-            f"Sessão {sessao.pk} do paciente {sessao.paciente.nome} marcada como {sessao.get_status_display()}.",
+            f"Sessão {sessao.pk}; status {status_anterior} -> {novo_status}.",
             request=request,
         )
-        for msg in mensagens:
-            messages.warning(request, msg)
+    messages.success(
+        request, f"Status da sessão atualizado para '{sessao.get_status_display()}'."
+    )
+    for msg in mensagens:
+        messages.warning(request, msg)
 
     return redirect("agenda")
 
@@ -355,19 +676,38 @@ def pacientes(request):
         if form.is_valid():
             paciente = form.save(commit=False)
             paciente.clinica = clinica
-            paciente.save()
-            registrar_auditoria(
-                clinica,
-                request.user,
-                "Cadastro de paciente",
-                f"Paciente {paciente.nome} criado (protocolo: {paciente.protocolo or 'não definido'}).",
-                request=request,
-            )
+            with transaction.atomic():
+                paciente.save()
+                registrar_auditoria(
+                    clinica,
+                    request.user,
+                    "Cadastro de paciente",
+                    f"Paciente {paciente.nome} criado (protocolo: {paciente.protocolo or 'não definido'}).",
+                    request=request,
+                )
             messages.success(request, "Paciente cadastrado. Revise o protocolo antes de usar operacionalmente.")
             return redirect("pacientes")
+    pacientes_lista = clinica.pacientes.select_related("protocolo").filter(ativo=True)
+    busca = request.GET.get("busca", "").strip()
+    protocolo_filtro = request.GET.get("protocolo", "").strip()
+    pendencia = request.GET.get("pendencia", "").strip()
+    if busca:
+        pacientes_lista = pacientes_lista.filter(
+            Q(nome__icontains=busca) | Q(protocolo__nome__icontains=busca)
+        )
+    if protocolo_filtro:
+        pacientes_lista = pacientes_lista.filter(protocolo_id=protocolo_filtro)
+    if pendencia == "dados":
+        pacientes_lista = pacientes_lista.filter(Q(peso_kg__isnull=True) | Q(altura_cm__isnull=True))
+    elif pendencia == "protocolo":
+        pacientes_lista = pacientes_lista.filter(protocolo__isnull=True)
     contexto.update(
         form=form,
-        pacientes=clinica.pacientes.select_related("protocolo").filter(ativo=True),
+        pacientes=pacientes_lista,
+        busca=busca,
+        protocolo_filtro=protocolo_filtro,
+        pendencia_filtro=pendencia,
+        protocolos_filtro=clinica.protocolos.filter(ativo=True),
         pode_editar=pode_editar,
     )
     return render(request, "core/pacientes.html", contexto)
@@ -391,18 +731,48 @@ def editar_paciente(request, pk):
     if not pode_editar:
         return HttpResponse("Perfil sem permissão para editar pacientes.", status=403)
     
-    form = PacienteForm(request.POST or None, instance=paciente, clinica=clinica)
+    form = PacienteEdicaoForm(
+        request.POST or None,
+        instance=paciente,
+        clinica=clinica,
+        pode_alterar_ativo=perfil.papel
+        in {
+            PerfilUsuario.Papel.ADMINISTRADOR,
+            PerfilUsuario.Papel.FARMACEUTICO,
+        },
+    )
     if request.method == "POST":
         if form.is_valid():
-            form.save()
-            registrar_auditoria(
-                clinica,
-                request.user,
-                "Edição de paciente",
-                f"Paciente {paciente.nome} atualizado.",
-                request=request,
-            )
+            with transaction.atomic():
+                form.save()
+                registrar_auditoria(
+                    clinica,
+                    request.user,
+                    "Edição de paciente",
+                    _detalhe_edicao("Paciente", paciente.pk, form),
+                    request=request,
+                )
             messages.success(request, "Paciente atualizado com sucesso.")
+            if {"protocolo", "data_inicio", "ciclos_previstos"}.intersection(
+                form.changed_data
+            ):
+                sessoes_futuras = paciente.sessoes.filter(
+                    data_hora__gte=timezone.now(),
+                    status__in=[
+                        SessaoTratamento.Status.AGENDADA,
+                        SessaoTratamento.Status.CONFIRMADA,
+                    ],
+                ).count()
+                if sessoes_futuras:
+                    messages.warning(
+                        request,
+                        f"Há {sessoes_futuras} agendamento(s) futuro(s) preservado(s). Revise-os individualmente para atualizar a previsão de compra.",
+                    )
+                else:
+                    messages.info(
+                        request,
+                        "Nenhum agendamento foi criado automaticamente. Agende os ciclos confirmados para que entrem na previsão de compra.",
+                    )
             return redirect("pacientes")
     
     contexto.update(form=form, paciente=paciente)
@@ -423,22 +793,41 @@ def medicamentos(request):
         if not pode_editar:
             return HttpResponse("Perfil sem permissão para cadastrar medicamentos.", status=403)
         if form.is_valid():
-            apresentacao = form.save(clinica)
-            registrar_auditoria(
-                clinica,
-                request.user,
-                "Cadastro de medicamento/apresentação",
-                f"Apresentação {apresentacao.descricao} ({apresentacao.medicamento.nome}) cadastrada.",
-                request=request,
-            )
+            with transaction.atomic():
+                apresentacao = form.save(clinica)
+                registrar_auditoria(
+                    clinica,
+                    request.user,
+                    "Cadastro de medicamento/apresentação",
+                    f"Apresentação {apresentacao.descricao} ({apresentacao.medicamento.nome}) cadastrada.",
+                    request=request,
+                )
             messages.success(request, "Apresentação cadastrada para revisão farmacêutica.")
             return redirect("medicamentos")
     apresentacoes = (
         clinica.medicamentos.filter(ativo=True)
-        .prefetch_related("apresentacoes")
+        .prefetch_related(
+            Prefetch("apresentacoes", queryset=Apresentacao.objects.filter(ativa=True))
+        )
         .order_by("nome")
     )
-    contexto.update(form=form, medicamentos=apresentacoes, pode_editar=pode_editar)
+    busca = request.GET.get("busca", "").strip()
+    if busca:
+        apresentacoes = apresentacoes.filter(
+            Q(nome__icontains=busca)
+            | Q(principio_ativo__icontains=busca)
+            | Q(apresentacoes__descricao__icontains=busca)
+        ).distinct()
+    contexto.update(
+        form=form,
+        medicamentos=apresentacoes,
+        busca=busca,
+        medicamentos_total=clinica.medicamentos.filter(ativo=True).count(),
+        apresentacoes_total=Apresentacao.objects.filter(
+            medicamento__clinica=clinica, ativa=True
+        ).count(),
+        pode_editar=pode_editar,
+    )
     return render(request, "core/medicamentos.html", contexto)
 
 
@@ -463,14 +852,15 @@ def editar_medicamento(request, pk):
     form = MedicamentoForm(request.POST or None, instance=medicamento)
     if request.method == "POST":
         if form.is_valid():
-            form.save()
-            registrar_auditoria(
-                clinica,
-                request.user,
-                "Edição de medicamento",
-                f"Medicamento {medicamento.nome} atualizado.",
-                request=request,
-            )
+            with transaction.atomic():
+                form.save()
+                registrar_auditoria(
+                    clinica,
+                    request.user,
+                    "Edição de medicamento",
+                    _detalhe_edicao("Medicamento", medicamento.pk, form),
+                    request=request,
+                )
             messages.success(request, "Medicamento atualizado com sucesso.")
             return redirect("medicamentos")
     
@@ -499,14 +889,15 @@ def editar_apresentacao(request, pk):
     form = ApresentacaoForm(request.POST or None, instance=apresentacao)
     if request.method == "POST":
         if form.is_valid():
-            form.save()
-            registrar_auditoria(
-                clinica,
-                request.user,
-                "Edição de apresentação",
-                f"Apresentação {apresentacao.descricao} ({apresentacao.medicamento.nome}) atualizada.",
-                request=request,
-            )
+            with transaction.atomic():
+                form.save()
+                registrar_auditoria(
+                    clinica,
+                    request.user,
+                    "Edição de apresentação",
+                    _detalhe_edicao("Apresentação", apresentacao.pk, form),
+                    request=request,
+                )
             messages.success(request, "Apresentação atualizada com sucesso.")
             return redirect("medicamentos")
     
@@ -630,7 +1021,7 @@ def quantitativo(request):
     form = PeriodoForm(
         request.GET or {"data_inicial": hoje, "data_final": hoje + timedelta(days=14)}
     )
-    linhas, inconsistencias = [], []
+    linhas, linhas_orais, inconsistencias = [], [], []
     if clinica and form.is_valid():
         sessoes = clinica.sessoes.select_related("paciente", "protocolo").prefetch_related(
             "protocolo__itens__apresentacao__medicamento"
@@ -642,13 +1033,491 @@ def quantitativo(request):
             status__in=["agendada", "confirmada"],
         )
         linhas, inconsistencias = resumir_sessoes(sessoes)
+        agendamentos_orais = clinica.medicacoes_orais.select_related(
+            "paciente", "medicamento", "apresentacao"
+        ).filter(vigente=True).exclude(
+            status__in=[MedicacaoOral.Status.PAUSADA, MedicacaoOral.Status.CONCLUIDA]
+        )
+        linhas_orais = resumir_medicacoes_orais(
+            agendamentos_orais,
+            form.cleaned_data["data_inicial"],
+            form.cleaned_data["data_final"],
+        )
     contexto.update(
         form=form,
         linhas=linhas,
+        linhas_orais=linhas_orais,
         inconsistencias=inconsistencias,
         total_frascos=sum(linha["frascos"] for linha in linhas),
+        total_unidades_orais=sum(linha["unidades"] for linha in linhas_orais),
+        periodo_data_inicial=(
+            form.cleaned_data["data_inicial"] if form.is_valid() else hoje
+        ),
+        periodo_data_final=(
+            form.cleaned_data["data_final"]
+            if form.is_valid()
+            else hoje + timedelta(days=14)
+        ),
     )
     return render(request, "core/quantitativo.html", contexto)
+
+
+@login_required
+def medicacoes_orais(request):
+    contexto = _contexto(request, "Agenda de Dispensação de Medicações Orais")
+    clinica, perfil = contexto["clinica"], contexto["perfil"]
+    if not clinica:
+        return render(request, "core/medicacoes_orais.html", contexto)
+
+    pode_editar = _pode_editar(
+        perfil, {PerfilUsuario.Papel.ADMINISTRADOR, PerfilUsuario.Papel.FARMACEUTICO}
+    )
+    form = MedicacaoOralForm(request.POST or None, clinica=clinica)
+    if request.method == "POST":
+        if not pode_editar:
+            return HttpResponse("Perfil sem permissão para planejar dispensações.", status=403)
+        if "criar_agendamento" in request.POST and form.is_valid():
+            agendamento = form.save(commit=False)
+            agendamento.clinica = clinica
+            if (
+                agendamento.paciente.clinica_id != clinica.id
+                or agendamento.medicamento.clinica_id != clinica.id
+            ):
+                return HttpResponse("Dados fora da clínica selecionada.", status=403)
+            try:
+                with transaction.atomic():
+                    agendamento.save()
+                    registrar_auditoria(
+                        clinica,
+                        request.user,
+                        "Cadastro de dispensação oral",
+                        f"Planejamento oral {agendamento.pk} criado para revisão farmacêutica.",
+                        request=request,
+                    )
+            except IntegrityError:
+                form.add_error(
+                    None,
+                    "Já existe um agendamento igual para paciente, medicamento e início.",
+                )
+            else:
+                messages.success(
+                    request,
+                    "Dispensações previstas geradas para revisão. Nenhuma compra ou autorização foi enviada automaticamente.",
+                )
+                return redirect("medicacoes_orais")
+
+        if "revisar_agendamento" in request.POST:
+            with transaction.atomic():
+                agendamento = (
+                    MedicacaoOral.objects.select_for_update()
+                    .filter(
+                        pk=request.POST.get("pk"), clinica=clinica, vigente=True
+                    )
+                    .first()
+                )
+                if not agendamento:
+                    return HttpResponse(
+                        "Planejamento oral vigente não encontrado.", status=404
+                    )
+                if agendamento.revisado_em:
+                    messages.info(request, "Este planejamento já foi revisado.")
+                    return redirect("medicacoes_orais")
+                agendamento.revisado_por = request.user
+                agendamento.revisado_em = timezone.now()
+                agendamento.save(
+                    update_fields=[
+                        "revisado_por",
+                        "revisado_em",
+                        "atualizado_em",
+                    ]
+                )
+                registrar_auditoria(
+                    clinica,
+                    request.user,
+                    "Revisão de dispensação oral",
+                    f"Agendamento oral {agendamento.pk} marcado como revisado manualmente.",
+                    request=request,
+                )
+            messages.success(request, "Revisão manual registrada na trilha de auditoria.")
+            return redirect("medicacoes_orais")
+        if "atualizar_status" in request.POST:
+            novo_status = request.POST.get("status")
+            if novo_status not in dict(MedicacaoOral.Status.choices):
+                return HttpResponse("Status oral inválido.", status=400)
+            transicoes_orais = {
+                MedicacaoOral.Status.PREVISTA: {
+                    MedicacaoOral.Status.AGUARDANDO_DOCUMENTO,
+                    MedicacaoOral.Status.PRONTA,
+                    MedicacaoOral.Status.PAUSADA,
+                },
+                MedicacaoOral.Status.AGUARDANDO_DOCUMENTO: {
+                    MedicacaoOral.Status.PREVISTA,
+                    MedicacaoOral.Status.PRONTA,
+                    MedicacaoOral.Status.PAUSADA,
+                },
+                MedicacaoOral.Status.PRONTA: {
+                    MedicacaoOral.Status.PAUSADA,
+                    MedicacaoOral.Status.CONCLUIDA,
+                },
+                MedicacaoOral.Status.PAUSADA: {
+                    MedicacaoOral.Status.PREVISTA,
+                    MedicacaoOral.Status.AGUARDANDO_DOCUMENTO,
+                },
+            }
+            with transaction.atomic():
+                agendamento = (
+                    MedicacaoOral.objects.select_for_update()
+                    .filter(
+                        pk=request.POST.get("pk"), clinica=clinica, vigente=True
+                    )
+                    .first()
+                )
+                if not agendamento:
+                    return HttpResponse(
+                        "Planejamento oral vigente não encontrado.", status=404
+                    )
+                if novo_status == agendamento.status:
+                    messages.info(request, "O planejamento já está com esse status.")
+                    return redirect("medicacoes_orais")
+                if novo_status not in transicoes_orais.get(
+                    agendamento.status, set()
+                ):
+                    return HttpResponse(
+                        "Transição de status oral não permitida.", status=409
+                    )
+                status_anterior = agendamento.status
+                agendamento.status = novo_status
+                agendamento.revisado_por = request.user
+                agendamento.revisado_em = timezone.now()
+                agendamento.save(
+                    update_fields=[
+                        "status",
+                        "revisado_por",
+                        "revisado_em",
+                        "atualizado_em",
+                    ]
+                )
+                registrar_auditoria(
+                    clinica,
+                    request.user,
+                    "Alteração de status de dispensação oral",
+                    f"Agendamento oral {agendamento.pk}; status {status_anterior} -> {novo_status}.",
+                    request=request,
+                )
+            messages.success(request, "Status atualizado após confirmação manual.")
+            return redirect("medicacoes_orais")
+
+    agendamentos = clinica.medicacoes_orais.select_related(
+        "paciente", "medicamento", "apresentacao", "revisado_por"
+    ).filter(vigente=True)
+    busca = request.GET.get("busca", "").strip()
+    classe = request.GET.get("classe", "").strip()
+    status = request.GET.get("status", "").strip()
+    if busca:
+        agendamentos = agendamentos.filter(
+            Q(paciente__nome__icontains=busca) | Q(medicamento__nome__icontains=busca)
+        )
+    if classe in dict(MedicacaoOral.Classe.choices):
+        agendamentos = agendamentos.filter(classe=classe)
+    if status in dict(MedicacaoOral.Status.choices):
+        agendamentos = agendamentos.filter(status=status)
+
+    contexto.update(
+        form=form,
+        agendamentos=agendamentos,
+        busca=busca,
+        classe_filtro=classe,
+        status_filtro=status,
+        classes=MedicacaoOral.Classe.choices,
+        statuses=MedicacaoOral.Status.choices,
+        pode_editar=pode_editar,
+        total_previstas=clinica.medicacoes_orais.filter(
+            vigente=True,
+            status=MedicacaoOral.Status.PREVISTA
+        ).count(),
+        total_documentos=clinica.medicacoes_orais.filter(
+            vigente=True,
+            status=MedicacaoOral.Status.AGUARDANDO_DOCUMENTO
+        ).count(),
+        total_prontas=clinica.medicacoes_orais.filter(
+            vigente=True,
+            status=MedicacaoOral.Status.PRONTA
+        ).count(),
+        total_prioridades=clinica.medicacoes_orais.filter(vigente=True)
+        .exclude(motivo_prioridade="")
+        .count(),
+    )
+    return render(request, "core/medicacoes_orais.html", contexto)
+
+
+@login_required
+def editar_medicacao_oral(request, pk):
+    contexto = _contexto(request, "Editar Medicação Oral")
+    clinica, perfil = contexto["clinica"], contexto["perfil"]
+    pode_editar = _pode_editar(
+        perfil,
+        {PerfilUsuario.Papel.ADMINISTRADOR, PerfilUsuario.Papel.FARMACEUTICO},
+    )
+    if not clinica or not pode_editar:
+        return HttpResponse("Perfil sem permissão para editar medicações orais.", status=403)
+    agendamento = MedicacaoOral.objects.filter(
+        pk=pk, clinica=clinica, vigente=True
+    ).first()
+    if not agendamento:
+        return HttpResponse("Planejamento oral não encontrado.", status=404)
+    if request.method == "POST":
+        salvo = False
+        try:
+            with transaction.atomic():
+                agendamento = (
+                    MedicacaoOral.objects.select_for_update()
+                    .filter(pk=pk, clinica=clinica, vigente=True)
+                    .first()
+                )
+                if not agendamento:
+                    return HttpResponse(
+                        "Este planejamento já foi substituído por outra versão.",
+                        status=409,
+                    )
+                form = MedicacaoOralEdicaoForm(
+                    request.POST, instance=agendamento, clinica=clinica
+                )
+                if form.is_valid():
+                    campos_modelo = [
+                        campo
+                        for campo in form._meta.fields
+                        if campo in form.cleaned_data
+                    ]
+                    campos_alterados = [
+                        campo
+                        for campo in form.changed_data
+                        if campo != "motivo_alteracao"
+                    ]
+                    if not campos_alterados:
+                        form.add_error(
+                            None, "Altere ao menos um campo do planejamento."
+                        )
+                    else:
+                        original_pk = agendamento.pk
+                        dados_nova_versao = {
+                            campo: form.cleaned_data[campo]
+                            for campo in campos_modelo
+                        }
+                        agendamento.vigente = False
+                        agendamento.save(update_fields=["vigente", "atualizado_em"])
+                        nova_versao = MedicacaoOral.objects.create(
+                            clinica=clinica,
+                            substitui=agendamento,
+                            vigente=True,
+                            status=MedicacaoOral.Status.PREVISTA,
+                            revisado_por=None,
+                            revisado_em=None,
+                            motivo_alteracao=form.cleaned_data["motivo_alteracao"][:300],
+                            **dados_nova_versao,
+                        )
+                        registrar_auditoria(
+                            clinica,
+                            request.user,
+                            "Nova versão de medicação oral",
+                            (
+                                f"Planejamento oral {original_pk} substituído por {nova_versao.pk}; "
+                                f"campos alterados: {', '.join(campos_alterados)}; "
+                                "motivo registrado na versão protegida."
+                            ),
+                            request=request,
+                        )
+                        salvo = True
+        except IntegrityError:
+            form.add_error(
+                None,
+                "Já existe um planejamento vigente com paciente, medicamento e início iguais.",
+            )
+        if salvo:
+            messages.success(
+                request,
+                "Nova versão salva. A anterior foi preservada e a revisão farmacêutica foi reiniciada.",
+            )
+            return redirect("medicacoes_orais")
+    else:
+        form = MedicacaoOralEdicaoForm(instance=agendamento, clinica=clinica)
+    contexto.update(form=form, agendamento=agendamento)
+    return render(request, "core/editar_medicacao_oral.html", contexto)
+
+
+@login_required
+def configuracoes(request):
+    contexto = _contexto(request, "Configurações do Sistema")
+    clinica, perfil = contexto["clinica"], contexto["perfil"]
+    if not clinica:
+        return render(request, "core/configuracoes.html", contexto)
+
+    configuracao, _ = ConfiguracaoClinica.objects.get_or_create(clinica=clinica)
+    pode_editar = _pode_editar(perfil, {PerfilUsuario.Papel.ADMINISTRADOR})
+    form = ConfiguracaoClinicaForm(request.POST or None, instance=configuracao)
+    if request.method == "POST":
+        if not pode_editar:
+            return HttpResponse("Perfil sem permissão para alterar configurações.", status=403)
+        if form.is_valid():
+            configuracao = form.save(commit=False)
+            configuracao.atualizado_por = request.user
+            configuracao.save()
+            registrar_auditoria(
+                clinica,
+                request.user,
+                "Alteração de configurações",
+                "Preferências operacionais da clínica atualizadas; nenhuma credencial foi exposta.",
+                request=request,
+            )
+            messages.success(request, "Configurações salvas e registradas na auditoria.")
+            return redirect("configuracoes")
+
+    contexto.update(
+        form=form,
+        configuracao=configuracao,
+        pode_editar=pode_editar,
+        ultimo_acesso=request.user.last_login,
+        fefo_ativo=True,
+        confirmacao_manual=True,
+    )
+    return render(request, "core/configuracoes.html", contexto)
+
+
+def _planilha_resumo_clinica(clinica):
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    arquivo = BytesIO()
+    workbook = Workbook()
+    resumo = workbook.active
+    resumo.title = "Resumo"
+    resumo.append(["Indicador", "Valor"])
+    resumo.append(["Clínica", _csv_seguro(clinica.nome)])
+    resumo.append(["Pacientes ativos", clinica.pacientes.filter(ativo=True).count()])
+    resumo.append(["Medicamentos ativos", clinica.medicamentos.filter(ativo=True).count()])
+    resumo.append(["Lotes ativos", clinica.lotes.filter(ativo=True).count()])
+    resumo.append(["Sessões", clinica.sessoes.count()])
+    resumo.append(
+        ["Agendamentos orais vigentes", clinica.medicacoes_orais.filter(vigente=True).count()]
+    )
+
+    estoque = workbook.create_sheet("Estoque")
+    estoque.append(["Medicamento", "Apresentação", "Lote", "Validade", "Atual", "Reservado", "Disponível"])
+    for lote in clinica.lotes.filter(ativo=True).select_related(
+        "apresentacao__medicamento"
+    ):
+        estoque.append(
+            [
+                _csv_seguro(lote.apresentacao.medicamento.nome),
+                _csv_seguro(lote.apresentacao.descricao),
+                _csv_seguro(lote.numero_lote),
+                lote.data_validade.isoformat(),
+                lote.quantidade_atual,
+                lote.quantidade_reservada,
+                lote.quantidade_disponivel,
+            ]
+        )
+
+    workbook.save(arquivo)
+    arquivo.seek(0)
+    return arquivo
+
+
+@login_required
+def exportar_resumo_excel(request):
+    perfil = _perfil(request)
+    if not perfil or perfil.papel not in {
+        PerfilUsuario.Papel.ADMINISTRADOR,
+        PerfilUsuario.Papel.FARMACEUTICO,
+        PerfilUsuario.Papel.GESTOR,
+    }:
+        return HttpResponse("Perfil sem permissão para exportar dados.", status=403)
+    registrar_auditoria(
+        perfil.clinica,
+        request.user,
+        "Exportação de resumo Excel",
+        "Resumo operacional e estoque exportados em XLSX.",
+        request=request,
+    )
+    return FileResponse(
+        _planilha_resumo_clinica(perfil.clinica),
+        as_attachment=True,
+        filename="resumo-oncologia-cacoal.xlsx",
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@login_required
+def relatorios_impressao(request):
+    perfil = _perfil(request)
+    if not perfil:
+        return HttpResponse("Usuário sem clínica vinculada.", status=403)
+    hoje = timezone.localdate()
+    lotes = perfil.clinica.lotes.filter(ativo=True)
+    contexto = {
+        "clinica": perfil.clinica,
+        "data": hoje,
+        "pacientes": perfil.clinica.pacientes.filter(ativo=True).count(),
+        "medicamentos": perfil.clinica.medicamentos.filter(ativo=True).count(),
+        "sessoes": perfil.clinica.sessoes.filter(
+            data_hora__date__year=hoje.year,
+            data_hora__date__month=hoje.month,
+        ).count(),
+        "lotes": lotes.count(),
+        "frascos": sum(lote.quantidade_atual for lote in lotes),
+    }
+    registrar_auditoria(
+        perfil.clinica,
+        request.user,
+        "Exportação de resumo PDF",
+        "Resumo operacional preparado para impressão/PDF.",
+        request=request,
+    )
+    return render(request, "core/relatorios_impressao.html", contexto)
+
+
+@login_required
+def backup_seguro(request):
+    perfil = _perfil(request)
+    if not perfil or perfil.papel != PerfilUsuario.Papel.ADMINISTRADOR:
+        return HttpResponse("Perfil sem permissão para gerar cópia.", status=403)
+    clinica = perfil.clinica
+    payload = {
+        "versao": 1,
+        "gerado_em": timezone.now().isoformat(),
+        "clinica": {"nome": clinica.nome, "ativa": clinica.ativa},
+        "configuracao": {
+            "setor": clinica.configuracao.setor,
+            "periodo_padrao_dias": clinica.configuracao.periodo_padrao_dias,
+            "densidade_tabela": clinica.configuracao.densidade_tabela,
+            "alertar_estoque_minimo": clinica.configuracao.alertar_estoque_minimo,
+            "alertar_validade_30_dias": clinica.configuracao.alertar_validade_30_dias,
+            "alertar_validacao_pendente": clinica.configuracao.alertar_validacao_pendente,
+        },
+        "contagens": {
+            "pacientes": clinica.pacientes.count(),
+            "medicamentos": clinica.medicamentos.count(),
+            "protocolos": clinica.protocolos.count(),
+            "lotes": clinica.lotes.count(),
+            "sessoes": clinica.sessoes.count(),
+            "medicacoes_orais": clinica.medicacoes_orais.count(),
+        },
+        "segredos_incluidos": False,
+        "observacao": "Cópia administrativa sem usuários, segredos ou credenciais.",
+    }
+    registrar_auditoria(
+        clinica,
+        request.user,
+        "Geração de cópia administrativa",
+        "Cópia sem credenciais gerada por administrador.",
+        request=request,
+    )
+    response = HttpResponse(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        content_type="application/json; charset=utf-8",
+    )
+    response["Content-Disposition"] = 'attachment; filename="copia-segura-oncologia-cacoal.json"'
+    return response
 
 
 MODULOS = {
@@ -842,13 +1711,13 @@ def estoque(request):
                         usuario=request.user,
                         observacao="Carga inicial de estoque",
                     )
-            registrar_auditoria(
-                clinica,
-                request.user,
-                "Cadastro de lote",
-                f"Lote {lote.numero_lote} ({lote.apresentacao}) com {lote.quantidade_inicial} frascos, validade {lote.data_validade:%d/%m/%Y}.",
-                request=request,
-            )
+                registrar_auditoria(
+                    clinica,
+                    request.user,
+                    "Cadastro de lote",
+                    f"Lote {lote.numero_lote} ({lote.apresentacao}) com {lote.quantidade_inicial} frascos, validade {lote.data_validade:%d/%m/%Y}.",
+                    request=request,
+                )
             messages.success(request, f"Lote {lote.numero_lote} cadastrado com sucesso.")
             return redirect("estoque")
 
@@ -856,48 +1725,84 @@ def estoque(request):
             mov = form_movimentacao.save(commit=False)
             mov.clinica = clinica
             mov.usuario = request.user
+            erro_movimentacao = ""
+            qtd = mov.quantidade
             with transaction.atomic():
-                lote = mov.lote
+                lote = Lote.objects.select_for_update().filter(
+                    pk=mov.lote_id, clinica=clinica, ativo=True
+                ).first()
+                if not lote:
+                    return HttpResponse("Lote não encontrado nesta clínica.", status=404)
                 if mov.tipo == MovimentacaoEstoque.TipoMovimentacao.RESERVA:
                     mov.quantidade = abs(mov.quantidade)
-                    mov.save()
-                    registrar_auditoria(
-                        clinica,
-                        request.user,
-                        "Reserva de estoque",
-                        f"Reserva de {mov.quantidade} frascos do lote {lote.numero_lote}.",
-                        request=request,
-                    )
-                    messages.success(
-                        request,
-                        f"Reserva de {mov.quantidade} frascos registrada para o lote {lote.numero_lote}.",
-                    )
-                    return redirect("estoque")
-                if mov.tipo in [MovimentacaoEstoque.TipoMovimentacao.SAIDA, MovimentacaoEstoque.TipoMovimentacao.PERDA]:
+                    if mov.quantidade <= 0:
+                        erro_movimentacao = "Informe uma quantidade maior que zero."
+                    elif mov.quantidade > lote.quantidade_disponivel:
+                        erro_movimentacao = "A reserva não pode superar o saldo disponível."
+                    if not erro_movimentacao:
+                        mov.save()
+                elif mov.tipo in [
+                    MovimentacaoEstoque.TipoMovimentacao.SAIDA,
+                    MovimentacaoEstoque.TipoMovimentacao.PERDA,
+                ]:
                     qtd = -abs(mov.quantidade)
+                    if abs(qtd) > lote.quantidade_disponivel:
+                        erro_movimentacao = "A saída/perda não pode superar o saldo disponível."
                 elif mov.tipo == MovimentacaoEstoque.TipoMovimentacao.ENTRADA:
                     qtd = abs(mov.quantidade)
                 else:
                     qtd = mov.quantidade
-                mov.quantidade = qtd
-                mov.save()
-                lote.quantidade_atual = max(0, lote.quantidade_atual + qtd)
-                lote.save()
-            registrar_auditoria(
-                clinica,
-                request.user,
-                "Movimentação de estoque",
-                f"{mov.get_tipo_display()} de {abs(qtd)} frascos do lote {lote.numero_lote}. Saldo atual: {lote.quantidade_atual}.",
-                request=request,
-            )
-            messages.success(request, f"Movimentação registrada para o lote {lote.numero_lote}.")
-            return redirect("estoque")
+                    if lote.quantidade_atual + qtd < 0:
+                        erro_movimentacao = "O ajuste não pode tornar o saldo negativo."
+                    elif lote.quantidade_atual + qtd < lote.quantidade_reservada:
+                        erro_movimentacao = (
+                            "O ajuste não pode deixar o saldo físico abaixo da quantidade reservada."
+                        )
+                if mov.tipo != MovimentacaoEstoque.TipoMovimentacao.RESERVA and not erro_movimentacao:
+                    mov.quantidade = qtd
+                    mov.save()
+                    lote.quantidade_atual += qtd
+                    lote.save(update_fields=["quantidade_atual", "atualizado_em"])
+            if erro_movimentacao:
+                form_movimentacao.add_error("quantidade", erro_movimentacao)
+            else:
+                acao = (
+                    "Reserva de estoque"
+                    if mov.tipo == MovimentacaoEstoque.TipoMovimentacao.RESERVA
+                    else "Movimentação de estoque"
+                )
+                registrar_auditoria(
+                    clinica,
+                    request.user,
+                    acao,
+                    f"{mov.get_tipo_display()} de {abs(mov.quantidade)} frascos no lote {lote.pk}; saldo físico {lote.quantidade_atual}.",
+                    request=request,
+                )
+                messages.success(request, f"{mov.get_tipo_display()} registrada para o lote {lote.numero_lote}.")
+                return redirect("estoque")
 
     lotes = (
         clinica.lotes.filter(ativo=True)
         .select_related("apresentacao__medicamento")
         .order_by("data_validade")
     )
+    busca = request.GET.get("busca", "").strip()
+    medicamento_filtro = request.GET.get("medicamento", "").strip()
+    status_filtro = request.GET.get("status", "").strip()
+    if busca:
+        lotes = lotes.filter(
+            Q(numero_lote__icontains=busca)
+            | Q(apresentacao__medicamento__nome__icontains=busca)
+        )
+    if medicamento_filtro:
+        lotes = lotes.filter(apresentacao__medicamento_id=medicamento_filtro)
+    lotes = list(lotes)
+    if status_filtro:
+        lotes = [
+            lote
+            for lote in lotes
+            if lote.status_validade == status_filtro or lote.status_estoque == status_filtro
+        ]
     movimentacoes = (
         clinica.movimentacoes_estoque.select_related(
             "lote__apresentacao__medicamento", "usuario"
@@ -909,9 +1814,55 @@ def estoque(request):
         form_movimentacao=form_movimentacao,
         lotes=lotes,
         movimentacoes=movimentacoes,
+        busca=busca,
+        medicamento_filtro=medicamento_filtro,
+        status_filtro=status_filtro,
+        medicamentos_filtro=clinica.medicamentos.filter(ativo=True),
         pode_editar=pode_editar,
     )
     return render(request, "core/estoque.html", contexto)
+
+
+@login_required
+def editar_lote(request, pk):
+    contexto = _contexto(request, "Editar Lote")
+    clinica, perfil = contexto["clinica"], contexto["perfil"]
+    pode_editar = _pode_editar(
+        perfil,
+        {PerfilUsuario.Papel.ADMINISTRADOR, PerfilUsuario.Papel.FARMACEUTICO},
+    )
+    if not clinica or not pode_editar:
+        return HttpResponse("Perfil sem permissão para editar lotes.", status=403)
+    lote = Lote.objects.filter(pk=pk, clinica=clinica).first()
+    if not lote:
+        return HttpResponse("Lote não encontrado.", status=404)
+    if request.method == "POST":
+        with transaction.atomic():
+            lote = Lote.objects.select_for_update().get(pk=pk, clinica=clinica)
+            form = LoteEdicaoForm(request.POST, instance=lote, clinica=clinica)
+            if form.is_valid():
+                form.save()
+                registrar_auditoria(
+                    clinica,
+                    request.user,
+                    "Edição de lote",
+                    _detalhe_edicao(
+                        "Lote",
+                        lote.pk,
+                        form,
+                        "Saldo físico preservado; ajustes permanecem em movimentações.",
+                    ),
+                    request=request,
+                )
+                messages.success(
+                    request,
+                    "Dados do lote atualizados; o saldo físico foi preservado.",
+                )
+                return redirect("estoque")
+    else:
+        form = LoteEdicaoForm(instance=lote, clinica=clinica)
+    contexto.update(form=form, lote=lote)
+    return render(request, "core/editar_lote.html", contexto)
 
 
 @login_required
@@ -941,6 +1892,11 @@ def alertas(request):
         return redirect("alertas")
 
     vencidos, criticos_validade, alertas_validade, estoque_baixo = coletar_alertas_estoque(clinica)
+    configuracao = contexto["configuracao_global"]
+    if not configuracao.alertar_validade_30_dias:
+        criticos_validade = []
+    if not configuracao.alertar_estoque_minimo:
+        estoque_baixo = []
 
     contexto.update(
         vencidos=vencidos,
@@ -1584,6 +2540,27 @@ def relatorios(request):
             por_estoque=por_estoque,
             lotes_urgentes=lotes_urgentes[:10],
         )
+    hoje_relatorio = timezone.localdate()
+    contexto.update(
+        tipos_relatorio=[
+            ("pacientes", "Pacientes com início no período"),
+            ("agenda", "Agenda por período"),
+            ("medicamentos", "Catálogo de medicamentos"),
+            ("medicacoes_orais", "Medicações orais por período"),
+            ("medicamento_periodo", "Medicamento específico por período"),
+            ("estoque", "Estoque, lotes e validades"),
+        ],
+        medicamentos_relatorio=(
+            clinica.medicamentos.filter(ativo=True) if clinica else []
+        ),
+        relatorio_data_inicial=hoje_relatorio,
+        relatorio_data_final=hoje_relatorio + timedelta(days=30),
+        pode_exportar_relacoes=(
+            contexto["perfil"].papel in PAPEIS_EXPORTACAO_IDENTIFICADA
+            if contexto["perfil"]
+            else False
+        ),
+    )
     return render(request, "core/relatorios.html", contexto)
 
 
@@ -1618,32 +2595,349 @@ def relatorios_consumo_csv(request):
         writer.writerow(
             [
                 inicio_mes.strftime("%Y-%m"),
-                item["lote__apresentacao__medicamento__nome"],
-                item["lote__apresentacao__descricao"],
+                _csv_seguro(item["lote__apresentacao__medicamento__nome"]),
+                _csv_seguro(item["lote__apresentacao__descricao"]),
                 abs(item["total_frascos"]),
             ]
         )
+    registrar_auditoria(
+        perfil.clinica,
+        request.user,
+        "Exportação de consumo",
+        f"Consumo exportado em CSV para {inicio_mes:%Y-%m}.",
+        request=request,
+    )
+    return response
+
+
+@login_required
+def relatorio_operacional_csv(request):
+    perfil = _perfil(request)
+    if not perfil or perfil.papel not in PAPEIS_EXPORTACAO_IDENTIFICADA:
+        return HttpResponse("Perfil sem permissão para exportar relações identificadas.", status=403)
+    clinica = perfil.clinica
+    tipo = request.GET.get("tipo", "").strip()
+    tipos_validos = {
+        "pacientes",
+        "agenda",
+        "medicamentos",
+        "medicacoes_orais",
+        "medicamento_periodo",
+        "estoque",
+    }
+    if tipo not in tipos_validos:
+        return HttpResponse("Tipo de relatório inválido.", status=400)
+    inicio, fim, erro = _periodo_exportacao(request)
+    if erro:
+        return HttpResponse(erro, status=400)
+    medicamento_id = request.GET.get("medicamento", "").strip()
+    medicamento = None
+    if medicamento_id:
+        medicamento = clinica.medicamentos.filter(pk=medicamento_id).first()
+        if not medicamento:
+            return HttpResponse("Medicamento não encontrado nesta clínica.", status=404)
+    if tipo == "medicamento_periodo" and not medicamento:
+        return HttpResponse("Selecione um medicamento para este relatório.", status=400)
+
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = (
+        f'attachment; filename="{tipo}-{inicio.isoformat()}-{fim.isoformat()}.csv"'
+    )
+    response.write("\ufeff")
+    writer = csv.writer(response, delimiter=";")
+    total_linhas = 0
+
+    if tipo == "pacientes":
+        writer.writerow(
+            ["ID", "Paciente", "Diagnóstico", "Protocolo", "Data início", "Ciclos previstos", "Ativo"]
+        )
+        pacientes = clinica.pacientes.select_related("protocolo").filter(
+            data_inicio__range=(inicio, fim)
+        )
+        for paciente in pacientes:
+            writer.writerow(
+                [
+                    paciente.pk,
+                    _csv_seguro(paciente.nome),
+                    _csv_seguro(paciente.diagnostico),
+                    _csv_seguro(paciente.protocolo.nome if paciente.protocolo else ""),
+                    paciente.data_inicio.isoformat(),
+                    paciente.ciclos_previstos,
+                    "Sim" if paciente.ativo else "Não",
+                ]
+            )
+            total_linhas += 1
+    elif tipo == "agenda":
+        writer.writerow(
+            ["ID", "Data/Hora", "Paciente", "Protocolo", "Ciclo", "Dia", "Status", "Observações"]
+        )
+        sessoes = clinica.sessoes.select_related("paciente", "protocolo").filter(
+            data_hora__date__range=(inicio, fim)
+        )
+        for sessao in sessoes:
+            writer.writerow(
+                [
+                    sessao.pk,
+                    timezone.localtime(sessao.data_hora).strftime("%d/%m/%Y %H:%M"),
+                    _csv_seguro(sessao.paciente.nome),
+                    _csv_seguro(sessao.protocolo.nome),
+                    sessao.ciclo,
+                    sessao.dia_ciclo,
+                    sessao.get_status_display(),
+                    _csv_seguro(sessao.observacoes),
+                ]
+            )
+            total_linhas += 1
+    elif tipo == "medicamentos":
+        writer.writerow(
+            [
+                "Medicamento ID",
+                "Medicamento",
+                "Princípio ativo",
+                "Observações",
+                "Medicamento ativo",
+                "Apresentação ID",
+                "Apresentação",
+                "Concentração",
+                "Quantidade mg",
+                "Estabilidade",
+                "Unidade",
+                "Condições de armazenamento",
+                "Observações de estabilidade",
+                "Fonte/referência",
+                "Observações da apresentação",
+                "Apresentação ativa",
+            ]
+        )
+        medicamentos = clinica.medicamentos.prefetch_related("apresentacoes")
+        if medicamento:
+            medicamentos = medicamentos.filter(pk=medicamento.pk)
+        for item in medicamentos:
+            apresentacoes = list(item.apresentacoes.all()) or [None]
+            for apresentacao in apresentacoes:
+                writer.writerow(
+                    [
+                        item.pk,
+                        _csv_seguro(item.nome),
+                        _csv_seguro(item.principio_ativo),
+                        _csv_seguro(item.observacoes),
+                        "Sim" if item.ativo else "Não",
+                        apresentacao.pk if apresentacao else "",
+                        _csv_seguro(apresentacao.descricao if apresentacao else ""),
+                        _csv_seguro(apresentacao.concentracao if apresentacao else ""),
+                        apresentacao.quantidade_mg if apresentacao else "",
+                        apresentacao.estabilidade_apos_abertura if apresentacao else "",
+                        apresentacao.get_unidade_estabilidade_display() if apresentacao else "",
+                        _csv_seguro(apresentacao.condicoes_armazenamento if apresentacao else ""),
+                        _csv_seguro(apresentacao.observacoes_estabilidade if apresentacao else ""),
+                        _csv_seguro(apresentacao.fonte_referencia if apresentacao else ""),
+                        _csv_seguro(apresentacao.observacoes if apresentacao else ""),
+                        "Sim" if apresentacao and apresentacao.ativa else "Não",
+                    ]
+                )
+                total_linhas += 1
+    elif tipo == "estoque":
+        writer.writerow(
+            ["Lote ID", "Medicamento", "Apresentação", "Lote", "Validade", "Atual", "Reservado", "Disponível", "Mínimo", "Observações", "Ativo"]
+        )
+        lotes = clinica.lotes.select_related("apresentacao__medicamento")
+        if medicamento:
+            lotes = lotes.filter(apresentacao__medicamento=medicamento)
+        for lote in lotes:
+            writer.writerow(
+                [
+                    lote.pk,
+                    _csv_seguro(lote.apresentacao.medicamento.nome),
+                    _csv_seguro(lote.apresentacao.descricao),
+                    _csv_seguro(lote.numero_lote),
+                    lote.data_validade.isoformat(),
+                    lote.quantidade_atual,
+                    lote.quantidade_reservada,
+                    lote.quantidade_disponivel,
+                    lote.estoque_minimo,
+                    _csv_seguro(lote.observacoes),
+                    "Sim" if lote.ativo else "Não",
+                ]
+            )
+            total_linhas += 1
+    else:
+        writer.writerow(
+            ["Origem", "Data prevista", "Paciente", "Medicamento", "Apresentação", "Dose", "Posologia", "Ciclo", "Unidades", "Status"]
+        )
+        orais = clinica.medicacoes_orais.select_related(
+            "paciente", "medicamento", "apresentacao"
+        ).filter(vigente=True)
+        if medicamento:
+            orais = orais.filter(medicamento=medicamento)
+        for oral in orais:
+            for ciclo in oral.ciclos_previstos:
+                if ciclo["numero"] < oral.ciclo_atual:
+                    continue
+                if not inicio <= ciclo["data"] <= fim:
+                    continue
+                writer.writerow(
+                    [
+                        "Oral",
+                        ciclo["data"].isoformat(),
+                        _csv_seguro(oral.paciente.nome),
+                        _csv_seguro(oral.medicamento.nome),
+                        _csv_seguro(oral.apresentacao.descricao if oral.apresentacao else ""),
+                        _csv_seguro(oral.dose_prescrita),
+                        _csv_seguro(oral.posologia),
+                        ciclo["numero"],
+                        oral.quantidade_por_ciclo,
+                        oral.get_status_display(),
+                    ]
+                )
+                total_linhas += 1
+        if tipo == "medicamento_periodo":
+            sessoes = clinica.sessoes.select_related("paciente", "protocolo").prefetch_related(
+                "protocolo__itens__apresentacao__medicamento"
+            ).filter(data_hora__date__range=(inicio, fim))
+            for sessao in sessoes:
+                for item in sessao.protocolo.itens.all():
+                    if item.apresentacao.medicamento_id != medicamento.pk:
+                        continue
+                    if not numero_na_lista(item.ciclos, sessao.ciclo):
+                        continue
+                    if not numero_na_lista(item.dias_ciclo, sessao.dia_ciclo):
+                        continue
+                    writer.writerow(
+                        [
+                            "Infusional",
+                            timezone.localtime(sessao.data_hora).date().isoformat(),
+                            _csv_seguro(sessao.paciente.nome),
+                            _csv_seguro(medicamento.nome),
+                            _csv_seguro(item.apresentacao.descricao),
+                            _csv_seguro(item.dose_valor),
+                            _csv_seguro(item.get_tipo_dose_display()),
+                            sessao.ciclo,
+                            "",
+                            sessao.get_status_display(),
+                        ]
+                    )
+                    total_linhas += 1
+
+    registrar_auditoria(
+        clinica,
+        request.user,
+        "Exportação de relatório operacional",
+        (
+            f"Tipo {tipo}; período {inicio.isoformat()} a {fim.isoformat()}; "
+            f"medicamento {medicamento.pk if medicamento else 'todos'}; {total_linhas} linha(s)."
+        ),
+        request=request,
+    )
     return response
 
 
 @login_required
 def auditoria(request):
     contexto = _contexto(request, "Usuários, Permissões e Trilhas de Auditoria")
-    clinica = contexto["clinica"]
+    clinica, perfil = contexto["clinica"], contexto["perfil"]
     if not clinica:
         return render(request, "core/auditoria.html", contexto)
+    if perfil.papel not in PAPEIS_EXPORTACAO_IDENTIFICADA:
+        return HttpResponse("Perfil sem permissão para consultar auditoria.", status=403)
 
-    registros = clinica.auditorias.select_related("usuario").order_by("-data_hora")[:50]
+    registros = clinica.auditorias.select_related("usuario").order_by("-data_hora")
+    busca = request.GET.get("busca", "").strip()
+    acao = request.GET.get("acao", "").strip()
+    dias_texto = request.GET.get("dias", "30").strip()
+    try:
+        dias = max(1, min(365, int(dias_texto)))
+    except ValueError:
+        dias = 30
+    registros = registros.filter(data_hora__gte=timezone.now() - timedelta(days=dias))
+    if busca:
+        registros = registros.filter(
+            Q(acao__icontains=busca)
+            | Q(detalhes__icontains=busca)
+            | Q(usuario__username__icontains=busca)
+        )
+    if acao:
+        registros = registros.filter(acao=acao)
+    acoes = clinica.auditorias.values_list("acao", flat=True).distinct().order_by("acao")
     perfis = clinica.perfis.select_related("usuario").order_by("usuario__username")
     auditoria_valida, quebrados = RegistroAuditoria.verificar_integridade(clinica)
 
     contexto.update(
-        registros=registros,
+        registros=registros[:100],
+        busca=busca,
+        acao_filtro=acao,
+        dias_filtro=dias,
+        acoes=acoes,
         perfis=perfis,
         auditoria_valida=auditoria_valida,
         auditoria_quebrados=len(quebrados),
     )
     return render(request, "core/auditoria.html", contexto)
+
+
+@login_required
+def auditoria_csv(request):
+    perfil = _perfil(request)
+    if not perfil or perfil.papel not in {
+        PerfilUsuario.Papel.ADMINISTRADOR,
+        PerfilUsuario.Papel.FARMACEUTICO,
+    }:
+        return HttpResponse("Perfil sem permissão para exportar auditoria.", status=403)
+    registros = perfil.clinica.auditorias.select_related("usuario").order_by("-data_hora")
+    busca = request.GET.get("busca", "").strip()
+    acao = request.GET.get("acao", "").strip()
+    try:
+        dias = max(1, min(365, int(request.GET.get("dias", "30"))))
+    except ValueError:
+        dias = 30
+    registros = registros.filter(data_hora__gte=timezone.now() - timedelta(days=dias))
+    if busca:
+        registros = registros.filter(
+            Q(acao__icontains=busca)
+            | Q(detalhes__icontains=busca)
+            | Q(usuario__username__icontains=busca)
+        )
+    if acao:
+        registros = registros.filter(acao=acao)
+    total_registros = registros.count()
+    registros = registros[:5000]
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = 'attachment; filename="auditoria-oncologia-cacoal.csv"'
+    response.write("\ufeff")
+    writer = csv.writer(response, delimiter=";")
+    writer.writerow(["Data/Hora", "Usuario", "Acao", "Detalhes", "IP", "Hash"])
+    for registro in registros:
+        writer.writerow(
+            [
+                timezone.localtime(registro.data_hora).strftime("%d/%m/%Y %H:%M:%S"),
+                _csv_seguro(registro.usuario.username if registro.usuario else "Sistema"),
+                _csv_seguro(registro.acao),
+                _csv_seguro(registro.detalhes),
+                registro.ip_origem or "",
+                registro.hash_registro,
+            ]
+        )
+    if total_registros > 5000:
+        writer.writerow(
+            [
+                "AVISO",
+                "Sistema",
+                "Exportação parcial",
+                f"Foram exportados 5.000 de {total_registros} registros; reduza o período ou os filtros.",
+                "",
+                "",
+            ]
+        )
+    registrar_auditoria(
+        perfil.clinica,
+        request.user,
+        "Exportação da trilha de auditoria",
+        (
+            f"Trilha exportada em CSV por usuário autorizado; filtros: {dias} dias, "
+            f"ação {acao or 'todas'}; {min(total_registros, 5000)} de {total_registros} registro(s)."
+        ),
+        request=request,
+    )
+    return response
 
 
 @login_required

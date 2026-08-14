@@ -1,5 +1,6 @@
 {% extends 'core/base.html' %}
 {% block content %}
+<section class="card"><form method="get" class="form-grid filters-grid"><p><label for="id_medicamento_estoque">Medicamento</label><select id="id_medicamento_estoque" name="medicamento"><option value="">Todos</option>{% for item in medicamentos_filtro %}<option value="{{ item.pk }}" {% if medicamento_filtro == item.pk|stringformat:'s' %}selected{% endif %}>{{ item.nome }}</option>{% endfor %}</select></p><p><label for="id_status_estoque">Status</label><select id="id_status_estoque" name="status"><option value="">Todos</option><option value="vencido" {% if status_filtro == 'vencido' %}selected{% endif %}>Vencido</option><option value="critico" {% if status_filtro == 'critico' %}selected{% endif %}>Validade crítica</option><option value="baixo" {% if status_filtro == 'baixo' %}selected{% endif %}>Estoque baixo</option><option value="esgotado" {% if status_filtro == 'esgotado' %}selected{% endif %}>Esgotado</option></select></p><p><label for="id_busca_estoque">Lote ou medicamento</label><input id="id_busca_estoque" name="busca" value="{{ busca }}" placeholder="Buscar"></p><div class="actions"><button class="button primary">Filtrar</button><a class="button secondary" href="{% url 'estoque' %}">Limpar</a></div></form></section>
 <div class="two-columns">
   {% if pode_editar %}
   <section class="card">
@@ -36,6 +37,8 @@
               <th>Disponível</th>
               <th>Status Validade</th>
               <th>Status Estoque</th>
+              <th>Observações</th>
+              {% if pode_editar %}<th>Ações</th>{% endif %}
             </tr>
           </thead>
           <tbody>
@@ -67,9 +70,11 @@
                   <span class="badge success" style="background:#dcfce7; color:#166534; padding:2px 8px; border-radius:4px; font-weight:600;">OK</span>
                 {% endif %}
               </td>
+              <td>{{ lote.observacoes|default:"—"|truncatechars:100 }}</td>
+              {% if pode_editar %}<td><a class="button secondary small" href="{% url 'editar_lote' lote.pk %}">Editar lote</a></td>{% endif %}
             </tr>
             {% empty %}
-            <tr><td colspan="8" class="empty">Nenhum lote de medicamento cadastrado.</td></tr>
+            <tr><td colspan="{% if pode_editar %}10{% else %}9{% endif %}" class="empty">Nenhum lote de medicamento cadastrado.</td></tr>
             {% endfor %}
           </tbody>
         </table>

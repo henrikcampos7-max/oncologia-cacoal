@@ -1,0 +1,4 @@
+interface:
+  display_name: "Quantitativo e Previsão"
+  short_description: "Demanda explicável e previsão para conferência humana"
+  default_prompt: "Use $oncologia-quantitativo-previsao para implementar e validar este módulo da Oncologia Cacoal."

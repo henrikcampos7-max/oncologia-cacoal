@@ -1,0 +1,34 @@
+{% extends 'core/base.html' %}
+{% block subtitle %}<p>Planejamento manual; cada dispensação depende de revisão farmacêutica.</p>{% endblock %}
+{% block content %}
+<section class="metric-grid" aria-label="Resumo de medicações orais">
+  <article class="card metric"><span>Dispensações previstas</span><strong>{{ total_previstas }}</strong></article>
+  <article class="card metric attention"><span>Documentos pendentes</span><strong>{{ total_documentos }}</strong></article>
+  <article class="card metric"><span>Prontas para dispensação</span><strong>{{ total_prontas }}</strong></article>
+  <article class="card metric attention"><span>Prioridades registradas</span><strong>{{ total_prioridades }}</strong></article>
+</section>
+
+<section class="card">
+  <form method="get" class="form-grid filters-grid oral-filters">
+    <p><label for="id_busca">Paciente ou medicamento</label><input id="id_busca" name="busca" value="{{ busca }}" placeholder="Buscar"></p>
+    <p><label for="id_classe_filtro">Classe</label><select id="id_classe_filtro" name="classe"><option value="">Todas as classes</option>{% for valor, rotulo in classes %}<option value="{{ valor }}" {% if classe_filtro == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}</select></p>
+    <p><label for="id_status_filtro">Status</label><select id="id_status_filtro" name="status"><option value="">Todos os status</option>{% for valor, rotulo in statuses %}<option value="{{ valor }}" {% if status_filtro == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}</select></p>
+    <div class="actions"><button class="button primary" type="submit">Filtrar</button><a class="button secondary" href="{% url 'medicacoes_orais' %}">Limpar</a></div>
+  </form>
+</section>
+
+<div class="two-columns oral-layout">
+  <section class="card table-card">
+    <div class="section-heading"><div><h2>Agenda de dispensações orais</h2><p>Datas calculadas a partir dos parâmetros cadastrados e exibidas para conferência.</p></div></div>
+    <div class="table-wrap"><table><thead><tr><th>Data prevista</th><th>Paciente</th><th>Classe</th><th>Medicamento</th><th>Dose / posologia</th><th>Ciclo</th><th>Status</th><th>Revisão e edição</th></tr></thead><tbody>
+      {% for item in agendamentos %}<tr>
+        <td>{{ item.data_proxima_dispensacao|date:"d/m/Y" }}{% if item.data_solicitacao_guia %}<small class="table-note">Guia: {{ item.data_solicitacao_guia|date:"d/m/Y" }}</small>{% endif %}<small class="table-note">Renovação: {{ item.data_renovacao_pedido|date:"d/m/Y" }}</small></td><td><strong>{{ item.paciente.nome }}</strong></td><td>{{ item.get_classe_display }}</td><td>{{ item.medicamento.nome }}{% if item.apresentacao %}<small class="table-note">{{ item.apresentacao.descricao }}</small>{% endif %}</td><td>{{ item.dose_prescrita|default:"—" }}{% if item.posologia %}<small class="table-note">{{ item.posologia }}</small>{% endif %}<small class="table-note">{{ item.quantidade_por_ciclo }} un. de estoque/ciclo</small></td><td>{{ item.ciclo_atual }} de {{ item.quantidade_ciclos }}</td><td><span class="status {{ item.status }}">{{ item.get_status_display }}</span></td>
+        <td>{% if pode_editar %}<a class="button secondary small" href="{% url 'editar_medicacao_oral' item.pk %}">Editar</a><form method="post" class="inline-actions">{% csrf_token %}<input type="hidden" name="pk" value="{{ item.pk }}"><select name="status" aria-label="Novo status"><option value="{{ item.status }}">{{ item.get_status_display }}</option>{% for valor, rotulo in statuses %}{% if valor != item.status %}<option value="{{ valor }}">{{ rotulo }}</option>{% endif %}{% endfor %}</select><button class="button secondary small" type="submit" name="atualizar_status">Confirmar</button>{% if not item.revisado_em %}<button class="button secondary small" type="submit" name="revisar_agendamento">Revisar</button>{% endif %}</form>{% elif item.revisado_em %}<span class="status">Revisado em {{ item.revisado_em|date:"d/m/Y H:i" }}</span>{% else %}Pendente{% endif %}</td>
+      </tr>{% empty %}<tr><td colspan="8" class="empty">Nenhum agendamento oral encontrado.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+
+  {% if pode_editar %}<aside class="card oral-form"><h2>Novo agendamento oral</h2><p>Transcreva dose e posologia da prescrição sem interpretação automática. A apresentação e suas unidades de estoque por ciclo (por exemplo, caixas) alimentam apenas a previsão logística.</p><form method="post" class="form-grid">{% csrf_token %}{{ form.as_p }}<div class="notice warning">A prioridade é registrada pelo farmacêutico e nunca é definida automaticamente.</div><button class="button primary wide" type="submit" name="criar_agendamento">Gerar dispensações previstas</button></form></aside>{% endif %}
+</div>
+{% if agendamentos %}<section class="card"><h2>Próximos ciclos previstos</h2><p>Projeção aritmética pelo intervalo cadastrado; não substitui a prescrição nem a validação.</p>{% for item in agendamentos|slice:":3" %}<div class="cycle-row"><strong>{{ item.paciente.nome }} · {{ item.medicamento.nome }}</strong><div class="cycle-timeline">{% for ciclo in item.ciclos_previstos %}<span><b>{{ ciclo.numero }}</b><small>{{ ciclo.data|date:"d/m/Y" }}</small></span>{% endfor %}</div></div>{% endfor %}</section>{% endif %}
+{% endblock %}

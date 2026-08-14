@@ -4,6 +4,7 @@ from .models import (
     AliasMedicamento,
     Apresentacao,
     Clinica,
+    ConfiguracaoClinica,
     DivergenciaTransferencia,
     ExtracaoEvidencia,
     ImportacaoArquivo,
@@ -11,6 +12,7 @@ from .models import (
     ItemProtocolo,
     ItemTransferencia,
     Lote,
+    MedicacaoOral,
     Medicamento,
     MovimentacaoEstoque,
     Paciente,
@@ -79,6 +81,26 @@ class SessaoTratamentoAdmin(admin.ModelAdmin):
     list_display = ("data_hora", "paciente", "protocolo", "ciclo", "dia_ciclo", "status")
     list_filter = ("clinica", "status")
     search_fields = ("paciente__nome", "protocolo__nome")
+
+
+@admin.register(MedicacaoOral)
+class MedicacaoOralAdmin(admin.ModelAdmin):
+    list_display = (
+        "data_inicio",
+        "paciente",
+        "medicamento",
+        "classe",
+        "status",
+        "revisado_por",
+    )
+    list_filter = ("clinica", "classe", "status")
+    search_fields = ("paciente__nome", "medicamento__nome")
+
+
+@admin.register(ConfiguracaoClinica)
+class ConfiguracaoClinicaAdmin(admin.ModelAdmin):
+    list_display = ("clinica", "setor", "periodo_padrao_dias", "atualizado_em")
+    readonly_fields = ("atualizado_por", "atualizado_em")
 
 
 @admin.register(Lote)

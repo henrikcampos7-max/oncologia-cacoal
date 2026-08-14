@@ -1,0 +1,4 @@
+interface:
+  display_name: "Medicações Orais"
+  short_description: "Dispensações orais, guias, ciclos e renovações"
+  default_prompt: "Use $oncologia-medicacoes-orais para implementar e validar este módulo da Oncologia Cacoal."

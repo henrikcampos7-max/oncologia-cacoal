@@ -1,0 +1,4 @@
+interface:
+  display_name: "Medicamentos e Apresentações"
+  short_description: "Cadastro farmacêutico rastreável e estoque mínimo"
+  default_prompt: "Use $oncologia-medicamentos-apresentacoes para implementar e validar este módulo da Oncologia Cacoal."

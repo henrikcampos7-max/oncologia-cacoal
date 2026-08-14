@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agenda e Validações"
+  short_description: "Agenda, pendências e validação farmacêutica manual"
+  default_prompt: "Use $oncologia-agenda-validacoes para implementar e validar este módulo da Oncologia Cacoal."

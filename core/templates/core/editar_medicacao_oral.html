@@ -1,0 +1,12 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<section class="card">
+  <div class="section-heading"><div><h2>Editar medicação oral</h2><p>Alterações de medicamento, apresentação, dose, posologia ou ciclos criam uma nova versão e preservam o histórico anterior.</p></div></div>
+  <form method="post" class="form-grid">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <div class="notice warning">A nova versão retorna ao status “Prevista” e precisa de nova revisão farmacêutica. O sistema não interpreta dose ou posologia.</div>
+    <div class="form-actions"><button class="button primary" type="submit">Salvar nova versão</button><a class="button secondary" href="{% url 'medicacoes_orais' %}">Cancelar</a></div>
+  </form>
+</section>
+{% endblock %}

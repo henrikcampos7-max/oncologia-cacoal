@@ -1,0 +1,4 @@
+interface:
+  display_name: "Relatórios e Indicadores"
+  short_description: "Indicadores administrativos e exportações revisáveis"
+  default_prompt: "Use $oncologia-relatorios-indicadores para implementar e validar este módulo da Oncologia Cacoal."

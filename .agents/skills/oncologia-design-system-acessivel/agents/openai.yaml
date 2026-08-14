@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Acessível Oncológico"
+  short_description: "Componentes responsivos e prevenção de erro"
+  default_prompt: "Use $oncologia-design-system-acessivel para revisar este fluxo da Oncologia Cacoal."

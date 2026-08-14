@@ -1,0 +1,4 @@
+interface:
+  display_name: "Exportação e Backup Seguro"
+  short_description: "Exportações, cópias e relatórios sem vazamentos"
+  default_prompt: "Use $oncologia-exportacao-backup-seguro para revisar este fluxo da Oncologia Cacoal."

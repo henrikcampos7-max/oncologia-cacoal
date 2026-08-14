@@ -1,0 +1,4 @@
+interface:
+  display_name: "Configurações do Sistema"
+  short_description: "Preferências, backup e regras operacionais seguras"
+  default_prompt: "Use $oncologia-configuracoes-sistema para implementar e validar este módulo da Oncologia Cacoal."

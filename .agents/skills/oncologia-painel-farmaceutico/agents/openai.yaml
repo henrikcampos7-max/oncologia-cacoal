@@ -1,0 +1,4 @@
+interface:
+  display_name: "Painel Farmacêutico"
+  short_description: "Painel operacional, prioridades e exportações seguras"
+  default_prompt: "Use $oncologia-painel-farmaceutico para implementar e validar este módulo da Oncologia Cacoal."

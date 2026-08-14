@@ -1,7 +1,7 @@
 # DEVELOPMENT_STATUS.md
 
 > Manter este arquivo curto. Ele é a memória operacional do projeto.
-> Estado confirmado contra o repositório real em 2026-08-11 (72 testes automatizados passando).
+> Estado confirmado contra o repositório real em 2026-08-12 (198 testes automatizados passando).
 
 ## Status geral
 Projeto em desenvolvimento. Base administrativa operacional completa e testada; motor de sobras projetadas integrado à previsão de compra; faltam sobras reais e a timeline de reaproveitamento.
@@ -23,9 +23,15 @@ Projeto em desenvolvimento. Base administrativa operacional completa e testada; 
 - [x] Relatórios gerenciais (indicadores, taxas de faltas/cancelamento, consumo mensal, estoque por validade/quantidade, lotes urgentes)
 - [x] Painel inicial (dashboard)
 - [x] Kit de agentes de desenvolvimento em `.github/agents/` (27) + instruções Copilot em `.github/copilot-instructions.md`
+- [x] 13 referências visuais fictícias mapeadas para 15 agentes orquestradores/QA e 18 skills modulares/transversais, com Modo de Economia de Tokens, acessibilidade e barreiras de segurança/LGPD
+- [x] Medicações orais: agenda, filtros, classes, ciclos e prazos previstos, estratégia de aquisição, prioridade humana, revisão/status manual e auditoria
+- [x] Configurações por clínica: painel, densidade, alertas, preferências, acesso administrativo e auditoria; sem exibir credenciais
+- [x] Filtros funcionais nas telas de pacientes, medicamentos, estoque e auditoria
+- [x] Exportações reais: agenda/quantitativo/auditoria/consumo CSV, resumo Excel, impressão/PDF e cópia administrativa JSON sem credenciais
+- [x] Segurança de produção: HTTPS, cookies seguros e HSTS configuráveis por ambiente
 
 ## Parcial
-- [ ] Quantitativo/previsão: resumo por período disponível, sem motor de demanda consolidada formal
+- [ ] Quantitativo/previsão: resumo por período e exportação disponíveis, sem motor de demanda consolidada formal
 - [ ] Sem estabilidade cadastrada, o motor marca `ESTABILIDADE_NAO_CADASTRADA` e não reaproveita (cadastro clínico fica a cargo do farmacêutico)
 
 ## Não implementado
@@ -36,7 +42,7 @@ Projeto em desenvolvimento. Base administrativa operacional completa e testada; 
 - [ ] Modelos DemandForecast / Leftover / LeftoverAllocation (previstos na arquitetura)
 
 ## Bugs / Bloqueios
-- [ ] Banco local (db.sqlite3) nunca migrado: comandos fora dos testes falham com "no such table" (executar `migrate` antes de rodar a aplicação local)
+- Nenhum bloqueio de código conhecido nesta entrega. Produção ainda exige infraestrutura protegida e revisão humana antes de publicar.
 
 ## Próxima Issue
 - [ ] Cadastro de sobras reais (modelo Leftover) integrado ao pool do motor via `sobras_iniciais`
@@ -49,7 +55,7 @@ Projeto em desenvolvimento. Base administrativa operacional completa e testada; 
 - [ ] Demanda individual e consolidada por medicamento
 - [ ] Demanda líquida e previsão de compra com margem configurável
 - [ ] Recebimento de pedidos gerando lotes
-- [ ] Impressão e exportação dos relatórios
+- [x] Impressão e exportação dos relatórios
 
 ## Não priorizar agora
 WhatsApp, dashboards sofisticados, notificações avançadas e integrações não essenciais.
@@ -65,4 +71,4 @@ WhatsApp, dashboards sofisticados, notificações avançadas e integrações nã
 - CI via GitHub Actions roda `manage.py check` e suíte de testes a cada push
 
 ## Bloqueios
-- Banco de desenvolvimento local ainda não migrado (ver Bugs/Bloqueios)
+- Publicação do Django depende da escolha/configuração do ambiente de hospedagem e de segredos externos; isso não foi automatizado nem versionado.

@@ -1,0 +1,12 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<section class="card">
+  <div class="section-heading"><div><h2>Editar agendamento</h2><p>Atualize somente dados de planejamento. O status continua no fluxo controlado da agenda.</p></div></div>
+  <form method="post" class="form-grid session-grid">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <div class="notice warning">Sessões realizadas, canceladas ou marcadas como falta não podem ser sobrescritas.</div>
+    <div class="form-actions"><button class="button primary" type="submit">Salvar alterações</button><a class="button secondary" href="{% url 'agenda' %}">Cancelar</a></div>
+  </form>
+</section>
+{% endblock %}

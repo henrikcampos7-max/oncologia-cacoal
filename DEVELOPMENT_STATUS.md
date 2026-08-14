@@ -38,12 +38,19 @@ Projeto em desenvolvimento. Fases 0–10 concluídas no núcleo (incluindo o mó
   - `RegistroAuditoria` agora é **append-only**: edição e exclusão bloqueadas no modelo (`PermissionDenied`) e no admin (somente leitura).
   - Cadeia de hashes SHA-256: cada registro guarda `hash_anterior` (hash do registro anterior da clínica) e `hash_registro`; alteração manual em qualquer campo quebra a cadeia e é detectável.
   - `RegistroAuditoria.verificar_integridade(clinica)` + comando `manage.py verificar_integridade_auditoria` + indicador na tela de auditoria.
+- **Fase 13 — Edições e relações operacionais**:
+  - Agenda com cadastro destacado, edição bloqueada após encerramento, transições concorrentes protegidas e reconfirmação obrigatória quando uma sessão confirmada é alterada.
+  - Medicamentos/apresentações com estabilidade após abertura e observações; lotes editáveis sem sobrescrever saldo ou histórico de movimentações.
+  - Medicações orais com dose/posologia transcritas, unidades de estoque por ciclo, troca versionada de medicamento e preservação da versão anterior.
+  - Previsão quantitativa inclui ciclos orais vigentes; ciclos passados e versões substituídas não entram novamente na compra.
+  - Relações CSV por período para pacientes, agenda, catálogo de medicamentos, medicações orais, medicamento específico e estoque, com isolamento por clínica, permissões e neutralização de fórmulas.
+  - Auditoria registra antes/depois das edições, filtros de exportação e ações identificadas; tela e exportação restritas a perfis autorizados.
 
 ## Parcial
-- Nenhum item pendente nas fases concluídas.
+- Publicação operacional depende de revisão humana, aplicação das migrações e configuração de hospedagem/segredos.
 
 ## Em andamento
-- Nenhum. OCR real disponível via providers Azure/Google; ativar com `TRANSFER_VISION_PROVIDER` e as variáveis de credencial do provider escolhido.
+- Revisão e homologação da Fase 13. OCR real disponível via providers Azure/Google; ativar com `TRANSFER_VISION_PROVIDER` e as variáveis de credencial do provider escolhido.
 
 ## Próxima Issue
 - [x] Validar o parser do relatório com PDFs reais de Ji-Paraná e ajustar padrões de linha (fixture real `transferencia_jiparana_02-07.pdf` validada: 16 itens, 11 medicamentos, todos com lote).

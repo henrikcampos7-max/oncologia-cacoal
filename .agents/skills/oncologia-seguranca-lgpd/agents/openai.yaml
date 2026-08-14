@@ -1,0 +1,4 @@
+interface:
+  display_name: "Segurança e LGPD Oncológica"
+  short_description: "Menor privilégio, dados fictícios e auditoria"
+  default_prompt: "Use $oncologia-seguranca-lgpd para revisar este fluxo da Oncologia Cacoal."

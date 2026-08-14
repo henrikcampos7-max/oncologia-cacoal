@@ -1,0 +1,4 @@
+interface:
+  display_name: "Auditoria e Histórico"
+  short_description: "Trilha imutável, filtros e exportações seguras"
+  default_prompt: "Use $oncologia-auditoria-historico para implementar e validar este módulo da Oncologia Cacoal."

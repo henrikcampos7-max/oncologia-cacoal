@@ -7,9 +7,8 @@ from django.dispatch import receiver
 from .file_security import build_upload_name, validate_uploaded_file
 from .models import Transferencia, TransferenciaEvidencia
 
-
 DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 PDF_EXTENSIONS = {".pdf"}
 
 
@@ -21,7 +20,7 @@ def _max_upload_bytes() -> int:
         return DEFAULT_MAX_UPLOAD_BYTES
 
 
-def _secure_new_upload(field_file, *, prefix: str, extensions: set[str], expected_format: str, max_pixels: int | None = None, max_pdf_pages: int | None = None) -> None:
+def _secure_new_upload(field_file, *, prefix: str, extensions: set[str], expected_format: str | None = None, max_pixels: int | None = None, max_pdf_pages: int | None = None) -> None:
     if not field_file or field_file._committed:
         return
     validate_uploaded_file(
@@ -32,12 +31,7 @@ def _secure_new_upload(field_file, *, prefix: str, extensions: set[str], expecte
         max_pixels=max_pixels,
         max_pdf_pages=max_pdf_pages,
     )
-    original_name = field_file.name or "arquivo"
-    field_file.name = build_upload_name(
-        prefix,
-        original_name,
-        extension_allowlist=extensions,
-    )
+    field_file.name = build_upload_name(prefix, field_file.name or "arquivo", extension_allowlist=extensions)
 
 
 @receiver(pre_save, sender=Transferencia)
@@ -57,6 +51,5 @@ def secure_transferencia_evidence_upload(sender, instance, **kwargs):
         instance.arquivo,
         prefix="transferencias/evidencias",
         extensions=IMAGE_EXTENSIONS,
-        expected_format=None,
         max_pixels=getattr(settings, "SECURE_IMAGE_MAX_PIXELS", 25_000_000),
     )

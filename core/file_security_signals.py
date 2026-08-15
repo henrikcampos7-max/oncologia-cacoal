@@ -9,7 +9,7 @@ from .models import Transferencia, TransferenciaEvidencia
 
 
 DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 PDF_EXTENSIONS = {".pdf"}
 
 
@@ -21,17 +21,17 @@ def _max_upload_bytes() -> int:
         return DEFAULT_MAX_UPLOAD_BYTES
 
 
-def _secure_new_upload(field_file, *, prefix: str, extensions: set[str]) -> None:
-    """Valida e troca o nome de um upload novo antes do FileField persistir."""
+def _secure_new_upload(field_file, *, prefix: str, extensions: set[str], expected_format: str, max_pixels: int | None = None, max_pdf_pages: int | None = None) -> None:
     if not field_file or field_file._committed:
         return
-
     validate_uploaded_file(
         field_file,
         max_bytes=_max_upload_bytes(),
         allowed_extensions=extensions,
+        expected_format=expected_format,
+        max_pixels=max_pixels,
+        max_pdf_pages=max_pdf_pages,
     )
-
     original_name = field_file.name or "arquivo"
     field_file.name = build_upload_name(
         prefix,
@@ -46,6 +46,8 @@ def secure_transferencia_report_upload(sender, instance, **kwargs):
         instance.relatorio_arquivo,
         prefix="transferencias/relatorios",
         extensions=PDF_EXTENSIONS,
+        expected_format="pdf",
+        max_pdf_pages=getattr(settings, "SECURE_PDF_MAX_PAGES", 100),
     )
 
 
@@ -55,4 +57,6 @@ def secure_transferencia_evidence_upload(sender, instance, **kwargs):
         instance.arquivo,
         prefix="transferencias/evidencias",
         extensions=IMAGE_EXTENSIONS,
+        expected_format=None,
+        max_pixels=getattr(settings, "SECURE_IMAGE_MAX_PIXELS", 25_000_000),
     )

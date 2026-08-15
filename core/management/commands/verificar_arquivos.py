@@ -3,7 +3,7 @@ from pathlib import Path
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
-from core.file_security import UnsafeFilePath, is_path_inside, sha256_file
+from core.file_security import is_path_inside, sha256_file
 
 
 class Command(BaseCommand):

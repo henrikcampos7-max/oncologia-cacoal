@@ -101,13 +101,8 @@ else:
     }
 
 AUTH_PASSWORD_VALIDATORS = [
-    {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
-        "OPTIONS": {"min_length": 15},
-    },
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 15}},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
@@ -122,41 +117,32 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "branding"]
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# Os arquivos de usuário são tratados como privados. Não configure um
+# servidor web para expor MEDIA_ROOT diretamente; use o endpoint autenticado
+# de arquivos de transferência do aplicativo.
 MEDIA_URL = "media/"
 MEDIA_ROOT = os.getenv("DJANGO_MEDIA_ROOT", str(BASE_DIR / "media"))
+SECURE_MEDIA_ENABLED = env_bool("DJANGO_SECURE_MEDIA_ENABLED", default=True)
+SECURE_UPLOAD_MAX_BYTES = int(os.getenv("DJANGO_SECURE_UPLOAD_MAX_BYTES", str(25 * 1024 * 1024)))
+SECURE_IMAGE_MAX_PIXELS = int(os.getenv("DJANGO_SECURE_IMAGE_MAX_PIXELS", str(25_000_000)))
+SECURE_PDF_MAX_PAGES = int(os.getenv("DJANGO_SECURE_PDF_MAX_PAGES", "100"))
 
-# Módulo de conferência de transferências (Ji-Paraná → Cacoal).
-# Limites de confiança e engine de extração; valores administráveis por env.
 TRANSFER_CONFERENCE_CONFIG = {
-    # Política de confiança por campo (SKILL 21/22): valores de referência.
-    "confianca": {
-        "alta": 0.95,
-        "revisao_recomendada": 0.80,
-        "revisao_obrigatoria": 0.0,
-    },
-    # Provider de extração visual. "mock" (determinístico, para testes/manual)
-    # é o padrão; "manual" exige entrada humana; "azure" e "google" são OCR
-    # reais via HTTP (Document Intelligence / Cloud Vision). Configuração
-    # somente por variável de ambiente — nenhuma chave deve ser versionada.
+    "confianca": {"alta": 0.95, "revisao_recomendada": 0.80, "revisao_obrigatoria": 0.0},
     "vision_provider": os.getenv("TRANSFER_VISION_PROVIDER", "mock"),
     "vision_timeout_segundos": int(os.getenv("TRANSFER_VISION_TIMEOUT", "60")),
     "tamanho_maximo_evidencia_mb": 10,
     "imagens_permitidas": ("png", "jpg", "jpeg", "webp"),
     "validade_critica_dias": 30,
-    # Azure AI Document Intelligence (prebuilt-layout).
     "azure": {
         "endpoint": os.getenv("TRANSFER_AZURE_ENDPOINT", ""),
         "chave": os.getenv("TRANSFER_AZURE_KEY", ""),
         "api_version": os.getenv("TRANSFER_AZURE_API_VERSION", "2024-11-30"),
         "modelo": os.getenv("TRANSFER_AZURE_MODEL", "prebuilt-layout"),
     },
-    # Google Cloud Vision (TEXT_DETECTION) — autenticação por token OAuth 2.0
-    # obtido fora do app (ex.: gcloud auth application-default print-access-token).
     "google": {
         "token": os.getenv("TRANSFER_GOOGLE_TOKEN", ""),
-        "api_endpoint": os.getenv(
-            "TRANSFER_GOOGLE_API_ENDPOINT", "https://vision.googleapis.com/v1/images:annotate"
-        ),
+        "api_endpoint": os.getenv("TRANSFER_GOOGLE_API_ENDPOINT", "https://vision.googleapis.com/v1/images:annotate"),
     },
 }
 

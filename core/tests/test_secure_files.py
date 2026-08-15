@@ -1,4 +1,3 @@
-from pathlib import Path
 import tempfile
 
 from django.contrib.auth import get_user_model
@@ -20,7 +19,12 @@ class SecureFilesTests(TestCase):
         self.outro = Clinica.objects.create(nome="Outra")
         User = get_user_model()
         self.user = User.objects.create_user(username="farmaceutico", password="senha-segura-123456")
-        PerfilUsuario.objects.create(user if False else usuario=self.user, clinica=self.destino, papel=PerfilUsuario.Papel.FARMACEUTICO, ativo=True)
+        PerfilUsuario.objects.create(
+            usuario=self.user,
+            clinica=self.destino,
+            papel=PerfilUsuario.Papel.FARMACEUTICO,
+            ativo=True,
+        )
         self.transferencia = Transferencia.objects.create(
             clinica_origem=self.origem,
             clinica_destino=self.destino,
@@ -42,7 +46,7 @@ class SecureFilesTests(TestCase):
         response = self.client.get(f"/transferencias/{self.transferencia.pk}/relatorio/arquivo/")
         self.assertEqual(response.status_code, 404)
 
-    def test_evidencia_nao_vira_url_publica_no_modelo(self):
+    def test_evidencia_nao_expoe_url_sem_arquivo(self):
         evidencia = TransferenciaEvidencia(
             transferencia=self.transferencia,
             hash_arquivo="a" * 64,

@@ -1,6 +1,7 @@
 import tempfile
 from pathlib import Path
 
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 
@@ -50,7 +51,7 @@ class SecureUploadSignalsTests(TestCase):
             ),
             hash_arquivo="b" * 64,
         )
-        with self.assertRaises(Exception):
+        with self.assertRaises(ValidationError):
             evidencia.save()
 
     def test_relatorio_recebe_nome_interno_pdf(self):

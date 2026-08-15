@@ -1,7 +1,7 @@
 """Controles de segurança para arquivos enviados e destinos gerados.
 
 Centraliza contenção de caminhos, rejeição de symlinks, validação de assinatura
-real (magic bytes), limites de tamanho/dimensão e hashes SHA-256.
+real (magic bytes), limites de tamanho/dimensão/páginas e hashes SHA-256.
 """
 
 from __future__ import annotations
@@ -168,9 +168,10 @@ def image_dimensions(stream: BinaryIO, fmt: str) -> tuple[int, int] | None:
                 if length < 2:
                     return None
                 if marker[0] in set(range(0xC0, 0xC4)) | set(range(0xC5, 0xC8)) | set(range(0xC9, 0xCC)) | set(range(0xCD, 0xD0)):
-                    precision = stream.read(1)
+                    if len(stream.read(1)) != 1:
+                        return None
                     size = stream.read(4)
-                    if len(precision) != 1 or len(size) != 4:
+                    if len(size) != 4:
                         return None
                     height, width = struct.unpack(">HH", size)
                     return width, height
@@ -181,6 +182,23 @@ def image_dimensions(stream: BinaryIO, fmt: str) -> tuple[int, int] | None:
     return None
 
 
+def pdf_page_count(stream: BinaryIO) -> int:
+    from pypdf import PdfReader
+
+    position = None
+    try:
+        if hasattr(stream, "tell"):
+            position = stream.tell()
+        if hasattr(stream, "seek"):
+            stream.seek(0)
+        return len(PdfReader(stream).pages)
+    except Exception as exc:
+        raise ValidationError("PDF inválido ou impossível de analisar com segurança.") from exc
+    finally:
+        if position is not None and hasattr(stream, "seek"):
+            stream.seek(position)
+
+
 def validate_uploaded_file(
     uploaded: UploadedFile,
     *,
@@ -188,6 +206,7 @@ def validate_uploaded_file(
     allowed_extensions: set[str] | None = None,
     expected_format: str | None = None,
     max_pixels: int | None = None,
+    max_pdf_pages: int | None = None,
 ) -> None:
     if not uploaded:
         raise ValidationError("Arquivo ausente.")
@@ -201,11 +220,7 @@ def validate_uploaded_file(
     if detected is None:
         raise ValidationError("Assinatura do arquivo não reconhecida.")
     if expected_format is not None and detected != expected_format:
-        raise ValidationError(
-            f"Conteúdo incompatível com o tipo esperado: esperado {expected_format}, identificado {detected}."
-        )
-    if expected_format in IMAGE_SIGNATURES.values() and detected != expected_format:
-        raise ValidationError("Assinatura de imagem incompatível com o tipo permitido.")
+        raise ValidationError(f"Conteúdo incompatível: esperado {expected_format}, identificado {detected}.")
     if max_pixels is not None and detected in {"jpeg", "png", "webp"}:
         dimensions = image_dimensions(uploaded.file, detected)
         if dimensions is None:
@@ -213,6 +228,8 @@ def validate_uploaded_file(
         width, height = dimensions
         if width <= 0 or height <= 0 or width * height > max_pixels:
             raise ValidationError("Imagem excede o limite de resolução permitido.")
+    if max_pdf_pages is not None and detected == "pdf" and pdf_page_count(uploaded.file) > max_pdf_pages:
+        raise ValidationError(f"PDF excede o limite de {max_pdf_pages} páginas.")
 
 
 def sha256_stream(stream: BinaryIO, *, chunk_size: int = 1024 * 1024) -> str:

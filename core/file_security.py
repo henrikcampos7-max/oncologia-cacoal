@@ -219,6 +219,11 @@ def validate_uploaded_file(
     detected = detect_file_format(uploaded.file)
     if detected is None:
         raise ValidationError("Assinatura do arquivo não reconhecida.")
+    expected_by_extension = IMAGE_SIGNATURES.get(extension)
+    if expected_by_extension and detected != expected_by_extension:
+        raise ValidationError(f"A extensão {extension} não corresponde ao conteúdo real ({detected}).")
+    if extension == ".pdf" and detected != "pdf":
+        raise ValidationError("A extensão .pdf não corresponde a um PDF real.")
     if expected_format is not None and detected != expected_format:
         raise ValidationError(f"Conteúdo incompatível: esperado {expected_format}, identificado {detected}.")
     if max_pixels is not None and detected in {"jpeg", "png", "webp"}:

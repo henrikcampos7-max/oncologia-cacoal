@@ -3,18 +3,12 @@ from django.urls import path
 
 from . import views
 from .forms import EmailOuUsuarioAuthenticationForm
+from .secure_files import baixar_evidencia_transferencia, baixar_relatorio_transferencia
 
 
 urlpatterns = [
     path("saude/", views.health, name="health"),
-    path(
-        "entrar/",
-        auth_views.LoginView.as_view(
-            template_name="core/login.html",
-            authentication_form=EmailOuUsuarioAuthenticationForm,
-        ),
-        name="login",
-    ),
+    path("entrar/", auth_views.LoginView.as_view(template_name="core/login.html", authentication_form=EmailOuUsuarioAuthenticationForm), name="login"),
     path("sair/", auth_views.LogoutView.as_view(), name="logout"),
     path("solicitar-acesso/", views.solicitar_acesso, name="solicitar_acesso"),
     path("solicitacoes-acesso/", views.solicitacoes_acesso, name="solicitacoes_acesso"),
@@ -37,18 +31,12 @@ urlpatterns = [
     path("compras/", views.compras, name="compras"),
     path("compras/pedidos/<int:pk>/", views.detalhe_pedido, name="detalhe_pedido"),
     path("sobras/", views.sobras, name="sobras"),
-path("transferencias/", views.transferencias, name="transferencias"),
+    path("transferencias/", views.transferencias, name="transferencias"),
     path("transferencias/<int:pk>/", views.detalhe_transferencia, name="detalhe_transferencia"),
-    path(
-        "transferencias/relatorio/importar/",
-        views.importar_relatorio_conferencia,
-        name="importar_relatorio_conferencia",
-    ),
-    path(
-        "transferencias/<int:pk>/conferencia/",
-        views.conferencia_transferencia,
-        name="conferencia_transferencia",
-    ),
+    path("transferencias/<int:pk>/relatorio/arquivo/", baixar_relatorio_transferencia, name="baixar_relatorio_transferencia"),
+    path("transferencias/evidencias/<int:pk>/arquivo/", baixar_evidencia_transferencia, name="baixar_evidencia_transferencia"),
+    path("transferencias/relatorio/importar/", views.importar_relatorio_conferencia, name="importar_relatorio_conferencia"),
+    path("transferencias/<int:pk>/conferencia/", views.conferencia_transferencia, name="conferencia_transferencia"),
     path("importacoes/", views.importacoes, name="importacoes"),
     path("importacoes/preparar/", views.importacao_preparar, name="importacao_preparar"),
     path("relatorios/", views.relatorios, name="relatorios"),

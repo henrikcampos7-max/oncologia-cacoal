@@ -2,183 +2,44 @@
 {% block content %}
 <section class="card">
   <h2>Conferência — Transferência {{ transferencia.numero }}</h2>
-  <p>
-    <strong>Status da conferência:</strong> {{ transferencia.get_status_conferencia_display }} ·
-    <strong>Origem:</strong> {{ transferencia.clinica_origem.nome }} ·
-    <strong>Destino:</strong> {{ transferencia.clinica_destino.nome }}
-    {% if transferencia.data_relatorio %} · <strong>Relatório:</strong> {{ transferencia.data_relatorio }}{% endif %}
-  </p>
+  <p><strong>Status da conferência:</strong> {{ transferencia.get_status_conferencia_display }} · <strong>Origem:</strong> {{ transferencia.clinica_origem.nome }} · <strong>Destino:</strong> {{ transferencia.clinica_destino.nome }}{% if transferencia.data_relatorio %} · <strong>Relatório:</strong> {{ transferencia.data_relatorio }}{% endif %}</p>
   {% if transferencia.relatorio_arquivo %}
-  <p><a href="{{ transferencia.relatorio_arquivo.url }}" target="_blank">Abrir PDF do relatório original</a></p>
+  <p><a href="{% url 'baixar_relatorio_transferencia' transferencia.pk %}" target="_blank" rel="noopener noreferrer">Abrir PDF do relatório original</a></p>
   {% endif %}
   <a class="button secondary" href="{% url 'detalhe_transferencia' transferencia.pk %}">Detalhes da transferência</a>
 </section>
-
 <section class="card">
   <h2>Itens e status da reconciliação</h2>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Item</th><th>Esperado</th><th>Lote relatório</th><th>Observado</th><th>Reconciliação</th><th>Conferência manual</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in itens %}
-        <tr>
-          <td><strong>{{ item.apresentacao.medicamento.nome }}</strong> — {{ item.apresentacao.descricao }}</td>
-          <td>{{ item.quantidade }}</td>
-          <td>{{ item.lote_esperado|default:"—" }}</td>
-          <td>
-            {% if item.reconciliacao %}
-              {% if item.reconciliacao.produto_observado %}{{ item.reconciliacao.produto_observado }}<br>{% endif %}
-              {% if item.reconciliacao.lote_observado %}Lote: {{ item.reconciliacao.lote_observado }}<br>{% endif %}
-              {% if item.reconciliacao.validade_observada %}Val.: {{ item.reconciliacao.validade_observada }}<br>{% endif %}
-              {% if item.reconciliacao.quantidade_observada %}Qtd: {{ item.reconciliacao.quantidade_observada }}{% endif %}
-            {% else %}—{% endif %}
-          </td>
-          <td>{{ item.get_status_reconciliacao_display }}</td>
-          <td>
-            {% if item.status_reconciliacao != 'conforme' and pode_aprovar != True %}
-            <form method="post" style="display:inline; white-space:nowrap;">
-              {% csrf_token %}
-              <input type="hidden" name="acao" value="confirmar_item">
-              <input type="hidden" name="item" value="{{ item.pk }}">
-              <input type="text" name="lote" placeholder="Lote" value="{{ item.reconciliacao.lote_observado|default:'' }}" style="width:110px;">
-              <input type="date" name="validade" style="width:140px;">
-              <input type="number" min="1" name="quantidade" placeholder="Qtd" style="width:70px;">
-              <button class="button secondary small" type="submit">Confirmar</button>
-            </form>
-            {% else %}
-              {% if item.status_reconciliacao == 'conforme' %}✓ conferido{% else %}{{ item.get_status_reconciliacao_display }}{% endif %}
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  <div class="table-wrap"><table><thead><tr><th>Item</th><th>Esperado</th><th>Lote relatório</th><th>Observado</th><th>Reconciliação</th><th>Conferência manual</th></tr></thead><tbody>
+  {% for item in itens %}
+  <tr><td><strong>{{ item.apresentacao.medicamento.nome }}</strong> — {{ item.apresentacao.descricao }}</td><td>{{ item.quantidade }}</td><td>{{ item.lote_esperado|default:"—" }}</td><td>{% if item.reconciliacao %}{% if item.reconciliacao.produto_observado %}{{ item.reconciliacao.produto_observado }}<br>{% endif %}{% if item.reconciliacao.lote_observado %}Lote: {{ item.reconciliacao.lote_observado }}<br>{% endif %}{% if item.reconciliacao.validade_observada %}Val.: {{ item.reconciliacao.validade_observada }}<br>{% endif %}{% if item.reconciliacao.quantidade_observada %}Qtd: {{ item.reconciliacao.quantidade_observada }}{% endif %}{% else %}—{% endif %}</td><td>{{ item.get_status_reconciliacao_display }}</td><td>{% if item.status_reconciliacao != 'conforme' and pode_aprovar != True %}<form method="post" style="display:inline; white-space:nowrap;">{% csrf_token %}<input type="hidden" name="acao" value="confirmar_item"><input type="hidden" name="item" value="{{ item.pk }}"><input type="text" name="lote" placeholder="Lote" value="{{ item.reconciliacao.lote_observado|default:'' }}" style="width:110px;"><input type="date" name="validade" style="width:140px;"><input type="number" min="1" name="quantidade" placeholder="Qtd" style="width:70px;"><button class="button secondary small" type="submit">Confirmar</button></form>{% else %}{% if item.status_reconciliacao == 'conforme' %}✓ conferido{% else %}{{ item.get_status_reconciliacao_display }}{% endif %}{% endif %}</td></tr>
+  {% endfor %}
+  </tbody></table></div>
 </section>
-
 <section class="card">
   <h2>Registrar evidência fotográfica</h2>
-  <p>Selecione o item correspondente e envie a foto da embalagem. Informe lote,
-  validade e quantidade quando estiverem legíveis — campos em branco exigem
-  revisão manual antes da aprovação.</p>
-  <form method="post" enctype="multipart/form-data">
-    {% csrf_token %}
-    <input type="hidden" name="acao" value="adicionar_evidencia">
-    <p>
-      <label>Item da transferência</label><br>
-      <select name="item" required>
-        <option value="">Selecione...</option>
-        {% for item in itens %}
-        <option value="{{ item.pk }}">{{ item.apresentacao.medicamento.nome }} — {{ item.apresentacao.descricao }}</option>
-        {% endfor %}
-      </select>
-    </p>
-    <p>
-      <label>Foto da embalagem (PNG, JPG, WEBP — máx. 10 MB)</label><br>
-      <input type="file" name="foto" accept="image/png,image/jpeg,image/webp" required>
-    </p>
-    <p>
-      <label>Lote (se legível)</label><br>
-      <input type="text" name="lote" value="{{ item.reconciliacao.lote_observado|default:'' }}" style="width:160px;">
-    </p>
-    <p>
-      <label>Validade (AAAA-MM-DD, se legível)</label><br>
-      <input type="date" name="validade">
-    </p>
-    <p>
-      <label>Quantidade (se legível)</label><br>
-      <input type="number" min="1" name="quantidade" style="width:120px;">
-    </p>
+  <p>PNG ou JPG. O servidor verifica a assinatura real do conteúdo, tamanho e resolução antes do processamento OCR.</p>
+  <form method="post" enctype="multipart/form-data">{% csrf_token %}<input type="hidden" name="acao" value="adicionar_evidencia">
+    <p><label>Item da transferência</label><br><select name="item" required><option value="">Selecione...</option>{% for item in itens %}<option value="{{ item.pk }}">{{ item.apresentacao.medicamento.nome }} — {{ item.apresentacao.descricao }}</option>{% endfor %}</select></p>
+    <p><label>Foto da embalagem</label><br><input type="file" name="foto" accept="image/png,image/jpeg" required></p>
+    <p><label>Lote (se legível)</label><br><input type="text" name="lote" style="width:160px;"></p>
+    <p><label>Validade (AAAA-MM-DD, se legível)</label><br><input type="date" name="validade"></p>
+    <p><label>Quantidade (se legível)</label><br><input type="number" min="1" name="quantidade" style="width:120px;"></p>
     <button class="button primary" type="submit">Processar evidência</button>
   </form>
 </section>
-
 <section class="card">
   <h2>Divergências</h2>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Tipo</th><th>Esperado</th><th>Observado</th><th>Severidade</th><th>Status</th><th>Ação</th></tr></thead>
-      <tbody>
-        {% for divergencia in divergencias %}
-        <tr>
-          <td>{{ divergencia.get_tipo_display }}</td>
-          <td>{{ divergencia.valor_esperado }}</td>
-          <td>{{ divergencia.valor_observado }}</td>
-          <td>{{ divergencia.get_severidade_display }}</td>
-          <td>{{ divergencia.get_status_display }}</td>
-          <td>
-            {% if divergencia.status == 'pendente' %}
-            <form method="post" style="display:inline;">
-              {% csrf_token %}
-              <input type="hidden" name="acao" value="resolver_divergencia">
-              <input type="hidden" name="divergencia" value="{{ divergencia.pk }}">
-              <input type="text" name="resolucao" placeholder="Justificativa..." required style="width:220px;">
-              <button class="button secondary" type="submit">Resolver</button>
-            </form>
-            {% else %}
-            {{ divergencia.resolucao|default:"" }}
-            {% endif %}
-          </td>
-        </tr>
-        {% empty %}
-        <tr><td colspan="6" class="empty">Nenhuma divergência registrada.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  <div class="table-wrap"><table><thead><tr><th>Tipo</th><th>Esperado</th><th>Observado</th><th>Severidade</th><th>Status</th><th>Ação</th></tr></thead><tbody>
+  {% for divergencia in divergencias %}<tr><td>{{ divergencia.get_tipo_display }}</td><td>{{ divergencia.valor_esperado }}</td><td>{{ divergencia.valor_observado }}</td><td>{{ divergencia.get_severidade_display }}</td><td>{{ divergencia.get_status_display }}</td><td>{% if divergencia.status == 'pendente' %}<form method="post" style="display:inline;">{% csrf_token %}<input type="hidden" name="acao" value="resolver_divergencia"><input type="hidden" name="divergencia" value="{{ divergencia.pk }}"><input type="text" name="resolucao" placeholder="Justificativa..." required style="width:220px;"><button class="button secondary" type="submit">Resolver</button></form>{% else %}{{ divergencia.resolucao|default:"" }}{% endif %}</td></tr>{% empty %}<tr><td colspan="6" class="empty">Nenhuma divergência registrada.</td></tr>{% endfor %}
+  </tbody></table></div>
 </section>
-
 <section class="card">
   <h2>Evidências enviadas</h2>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Arquivo</th><th>Item vinculado</th><th>Status</th><th>Duplicidade?</th><th>Extrações</th></tr></thead>
-      <tbody>
-        {% for evidencia in evidencias %}
-        <tr>
-          <td><a href="{{ evidencia.arquivo.url }}" target="_blank">{{ evidencia.arquivo.name }}</a></td>
-          <td>{{ evidencia.item.apresentacao|default:"—" }}</td>
-          <td>{{ evidencia.get_status_display }}</td>
-          <td>{% if evidencia.suspeita_duplicidade %}sim{% else %}não{% endif %}</td>
-          <td>
-            {% for extracao in evidencia.extracoes.all|slice:":3" %}
-              {{ extracao.engine }} (lote {{ extracao.lote|default:"?" }}){% if not forloop.last %}, {% endif %}
-            {% empty %}—{% endfor %}
-          </td>
-        </tr>
-        {% empty %}
-        <tr><td colspan="5" class="empty">Nenhuma evidência enviada.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  <div class="table-wrap"><table><thead><tr><th>Arquivo</th><th>Item vinculado</th><th>Status</th><th>Duplicidade?</th><th>Extrações</th></tr></thead><tbody>
+  {% for evidencia in evidencias %}<tr><td><a href="{% url 'baixar_evidencia_transferencia' evidencia.pk %}" target="_blank" rel="noopener noreferrer">Ver evidência</a></td><td>{{ evidencia.item.apresentacao|default:"—" }}</td><td>{{ evidencia.get_status_display }}</td><td>{% if evidencia.suspeita_duplicidade %}sim{% else %}não{% endif %}</td><td>{% for extracao in evidencia.extracoes.all|slice:":3" %}{{ extracao.engine }} (lote {{ extracao.lote|default:"?" }}){% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</td></tr>{% empty %}<tr><td colspan="5" class="empty">Nenhuma evidência enviada.</td></tr>{% endfor %}
+  </tbody></table></div>
 </section>
-
-{% if pode_aprovar %}
-<section class="card">
-  <h2>Aprovação</h2>
-  <p>Todos os itens foram reconciliados sem divergências pendentes. Ao aprovar,
-  a transferência fica apta para integração ao estoque.</p>
-  <form method="post">
-    {% csrf_token %}
-    <button class="button primary" type="submit" name="acao" value="aprovar">Aprovar conferência</button>
-  </form>
-</section>
-{% endif %}
-
-{% if pode_integrar %}
-<section class="card">
-  <h2>Integração ao estoque</h2>
-  <p>A conferência foi aprovada. A integração cria os lotes no estoque de
-  Cacoal com os lote/validade observados e registra as movimentações de entrada.</p>
-  <form method="post" onsubmit="return confirm('Integrar ao estoque agora? Esta ação é irreversível.');">
-    {% csrf_token %}
-    <button class="button primary" type="submit" name="acao" value="integrar_estoque">Integrar ao estoque</button>
-  </form>
-</section>
-{% endif %}
+{% if pode_aprovar %}<section class="card"><h2>Aprovação</h2><p>Todos os itens foram reconciliados sem divergências pendentes. Ao aprovar, a transferência fica apta para integração ao estoque.</p><form method="post">{% csrf_token %}<button class="button primary" type="submit" name="acao" value="aprovar">Aprovar conferência</button></form></section>{% endif %}
+{% if pode_integrar %}<section class="card"><h2>Integração ao estoque</h2><p>A conferência foi aprovada. A integração cria os lotes no estoque de Cacoal com os lote/validade observados e registra as movimentações de entrada.</p><form method="post" onsubmit="return confirm('Integrar ao estoque agora? Esta ação é irreversível.');">{% csrf_token %}<button class="button primary" type="submit" name="acao" value="integrar_estoque">Integrar ao estoque</button></form></section>{% endif %}
 {% endblock %}
